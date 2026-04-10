@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>EtherShare | Peer-to-Peer File Sharing</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary-container": "#00d1ff",
+                        "outline-variant": "#3c494e",
+                        "error-container": "#93000a",
+                        "on-tertiary-container": "#004f90",
+                        "on-secondary-fixed-variant": "#6200bc",
+                        "error": "#ffb4ab",
+                        "surface-container-low": "#1c1b1c",
+                        "primary": "#a4e6ff",
+                        "tertiary-container": "#99c3ff",
+                        "on-background": "#e5e2e3",
+                        "on-tertiary": "#00315d",
+                        "on-primary-fixed-variant": "#004e60",
+                        "secondary-container": "#6e06d0",
+                        "on-error": "#690005",
+                        "surface-container-highest": "#353436",
+                        "on-surface-variant": "#bbc9cf",
+                        "secondary-fixed": "#eddcff",
+                        "on-surface": "#e5e2e3",
+                        "on-secondary": "#450086",
+                        "surface-variant": "#353436",
+                        "on-secondary-fixed": "#290055",
+                        "inverse-surface": "#e5e2e3",
+                        "primary-fixed-dim": "#4cd6ff",
+                        "surface-container-lowest": "#0e0e0f",
+                        "surface-container-high": "#2a2a2b",
+                        "inverse-on-surface": "#313031",
+                        "surface-bright": "#39393a",
+                        "tertiary": "#c9deff",
+                        "surface-tint": "#4cd6ff",
+                        "surface-dim": "#131314",
+                        "tertiary-fixed-dim": "#a4c9ff",
+                        "on-tertiary-fixed": "#001c39",
+                        "on-primary": "#003543",
+                        "surface": "#131314",
+                        "secondary-fixed-dim": "#d8b9ff",
+                        "secondary": "#d8b9ff",
+                        "outline": "#859399",
+                        "tertiary-fixed": "#d4e3ff",
+                        "on-secondary-container": "#d5b5ff",
+                        "on-tertiary-fixed-variant": "#004883",
+                        "surface-container": "#201f20",
+                        "inverse-primary": "#00677f",
+                        "on-primary-fixed": "#001f28",
+                        "on-primary-container": "#00566a",
+                        "primary-fixed": "#b7eaff",
+                        "on-error-container": "#ffdad6",
+                        "background": "#131314"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "1.0rem",
+                        "xl": "1.5rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body {
+            background-color: #131314;
+            color: #e5e2e3;
+        }
+        .ethereal-glow {
+            background: radial-gradient(circle at 50% 50%, rgba(0, 209, 255, 0.05) 0%, transparent 70%);
+        }
+    </style>
+</head>
+<body class="font-body selection:bg-primary-container/30">
+<!-- TopNavBar -->
+<nav class="fixed top-0 w-full z-50 bg-neutral-950/40 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,209,255,0.08)]">
+<div class="flex justify-between items-center px-8 py-4 max-w-screen-2xl mx-auto font-headline tracking-tight">
+<div class="text-2xl font-bold tracking-tighter text-neutral-100">
+                EtherShare
+            </div>
+<div class="hidden md:flex items-center gap-8">
+<a class="text-cyan-400 font-semibold hover:text-cyan-300 transition-colors duration-300" href="#">How it works</a>
+</div>
+<div class="flex items-center gap-4">
+<button class="bg-gradient-to-br from-primary to-secondary text-on-primary-fixed px-6 py-2 rounded-lg font-bold active:scale-95 transition-transform hover:brightness-110">
+                    Get Started
+                </button>
+</div>
+</div>
+</nav>
+<!-- Hero Section / Canvas -->
+<main class="relative min-h-screen flex flex-col items-center justify-center pt-20 px-6 overflow-hidden">
+<!-- Background Ambient Elements -->
+<div class="absolute top-1/4 -left-20 w-96 h-96 bg-primary/10 blur-[120px] rounded-full"></div>
+<div class="absolute bottom-1/4 -right-20 w-[500px] h-[500px] bg-secondary/10 blur-[150px] rounded-full"></div>
+<div class="relative z-10 w-full max-w-4xl text-center space-y-12">
+<!-- Headline Cluster -->
+<div class="space-y-4">
+<h1 class="font-headline text-5xl md:text-7xl font-bold tracking-tight text-on-surface leading-tight">
+                    Weightless Data <br/>
+<span class="text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary">Without Limits.</span>
+</h1>
+<p class="font-body text-lg md:text-xl text-on-surface-variant max-w-2xl mx-auto">
+                    Send files directly from browser to browser. Encrypted, peer-to-peer, and lightning fast. No intermediate servers.
+                </p>
+</div>
+<!-- Signature Component: Drag-and-Drop Zone -->
+<div class="group relative p-1 rounded-xl bg-gradient-to-br from-outline-variant/20 to-transparent">
+<div class="relative bg-surface-container-lowest border-2 border-dashed border-outline-variant/30 rounded-xl p-12 md:p-20 transition-all duration-500 backdrop-blur-3xl hover:border-primary/50 hover:bg-primary-container/5">
+<div class="flex flex-col items-center gap-6">
+<!-- Icon -->
+<div class="w-20 h-20 rounded-full bg-surface-container-high flex items-center justify-center text-primary-container shadow-[0_0_40px_rgba(0,209,255,0.15)] group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-4xl" style="font-variation-settings: 'FILL' 1;">cloud_upload</span>
+</div>
+<!-- Instruction -->
+<div class="space-y-2">
+<h2 class="font-headline text-2xl md:text-3xl font-bold text-on-surface">Drag and drop files</h2>
+<p class="text-on-surface-variant">or use the selector below to begin sharing</p>
+</div>
+<!-- Action Button -->
+<button class="mt-4 bg-gradient-to-r from-primary to-secondary text-on-primary-fixed font-bold px-10 py-4 rounded-lg shadow-[0_0_20px_rgba(164,230,255,0.3)] hover:brightness-110 active:scale-95 transition-all flex items-center gap-2">
+                            Select File
+                            <span class="material-symbols-outlined text-lg">add_circle</span>
+</button>
+</div>
+<!-- Inner Glow Effect -->
+<div class="absolute inset-0 pointer-events-none rounded-xl border-t border-white/5"></div>
+</div>
+</div>
+<!-- Metadata / Features Bento -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-12">
+<div class="bg-surface-container-low p-8 rounded-xl text-left space-y-3 transition-colors hover:bg-surface-container-high">
+<span class="material-symbols-outlined text-primary">security</span>
+<h3 class="font-headline font-semibold text-lg text-on-surface">End-to-End</h3>
+<p class="text-sm text-on-surface-variant leading-relaxed">Files are encrypted before they ever leave your machine.</p>
+</div>
+<div class="bg-surface-container-low p-8 rounded-xl text-left space-y-3 transition-colors hover:bg-surface-container-high">
+<span class="material-symbols-outlined text-secondary">bolt</span>
+<h3 class="font-headline font-semibold text-lg text-on-surface">Zero Wait</h3>
+<p class="text-sm text-on-surface-variant leading-relaxed">Streaming transfers start instantly, even for massive 4K video files.</p>
+</div>
+<div class="bg-surface-container-low p-8 rounded-xl text-left space-y-3 transition-colors hover:bg-surface-container-high">
+<span class="material-symbols-outlined text-tertiary">public</span>
+<h3 class="font-headline font-semibold text-lg text-on-surface">WebRTC Powered</h3>
+<p class="text-sm text-on-surface-variant leading-relaxed">Direct browser-to-browser connection for maximum privacy.</p>
+</div>
+</div>
+</div>
+</main>
+<!-- Visual Showcase Section -->
+<section class="max-w-screen-2xl mx-auto px-8 py-24 space-y-16">
+<div class="flex flex-col md:flex-row gap-12 items-center">
+<div class="w-full md:w-1/2 space-y-6">
+<span class="label-sm text-primary uppercase tracking-widest">Architected for Speed</span>
+<h2 class="font-headline text-4xl md:text-5xl font-bold leading-tight">The future of data <br/> is decentralized.</h2>
+<p class="text-on-surface-variant leading-relaxed">By removing the middleman, EtherShare enables transfers that are limited only by your own internet connection. No storage limits, no speed caps, just pure connectivity.</p>
+<ul class="space-y-4 pt-4">
+<li class="flex items-center gap-3 text-on-surface">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                        No account required
+                    </li>
+<li class="flex items-center gap-3 text-on-surface">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                        Files are never stored on a server
+                    </li>
+<li class="flex items-center gap-3 text-on-surface">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                        Unlimited file size transfers
+                    </li>
+</ul>
+</div>
+<div class="w-full md:w-1/2">
+<div class="aspect-square rounded-xl bg-surface-container-low overflow-hidden relative group">
+<img alt="Network Visualization" class="w-full h-full object-cover opacity-60 group-hover:scale-105 transition-transform duration-700" data-alt="Abstract futuristic digital network visualization with glowing nodes and cyan connection lines on a dark background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBaw124_LE7oQDhrVaOsSiaOPObIk6T1vKdO5SLSk7WbGdYEWQwTKzya7ci3nzwcXkzri9QTiTlX6wIEscCdTtjlqP6Ps_-8hzS4HG1VlQ6Q8JXaf7oXiFit0uP14oUNerdpoDqcOzSg1ntNQyUUg-Bbm-xO6UT6upSHhVqyt4kZT_bg3r3yRFTHr4vawKwwH1lKkQURyDpOZFkRRAVUhMtiIPOFB_ixANdI3u4eUhafQrQac-EwMBVuq4uW_rBGS-X5KYIR8BUUTrS"/>
+<div class="absolute inset-0 bg-gradient-to-t from-surface via-transparent to-transparent"></div>
+</div>
+</div>
+</div>
+</section>
+<!-- Footer -->
+<footer class="w-full py-12 bg-neutral-950 border-t border-neutral-800/20">
+<div class="flex flex-col md:flex-row justify-between items-center px-8 gap-6 max-w-screen-2xl mx-auto">
+<div class="text-neutral-400 font-inter text-sm">
+                © 2024 Kinetic Ether
+            </div>
+<div class="flex gap-8">
+<a class="text-neutral-500 hover:text-cyan-400 transition-colors text-sm font-inter" href="#">Terms</a>
+<a class="text-neutral-500 hover:text-cyan-400 transition-colors text-sm font-inter" href="#">Privacy</a>
+<a class="text-neutral-500 hover:text-cyan-400 transition-colors text-sm font-inter" href="#">Twitter</a>
+</div>
+<div class="flex gap-4">
+<div class="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer">
+<span class="material-symbols-outlined text-sm">share</span>
+</div>
+</div>
+</div>
+</footer>
+</body></html>
