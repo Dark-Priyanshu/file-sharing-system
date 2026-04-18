@@ -184,11 +184,11 @@ class P2PTransfer {
             console.log('[Control] Metadata received:', msg);
             if (this.onMetadata) this.onMetadata(msg);
         } else if (msg.type === 'start') {
-            this._startSecurely(200);
+            this._startSecurely(0, 200);
         } else if (msg.type === 'resume') {
             const offset = msg.offset || 0;
             console.log('[Control] Resuming from offset:', offset);
-            this._startSecurely(200); // Use settle delay even for resume
+            this._startSecurely(offset, 200); // Use settle delay even for resume
         }
     }
 
@@ -233,15 +233,32 @@ class P2PTransfer {
     }
 
     // ---- CHANNEL SETTLE & START ----
-    _startSecurely(delay = 200) {
+    _startSecurely(offset = 0, delay = 200) {
         console.log(`[Engine] Settle delay: ${delay}ms before data burst...`);
         setTimeout(() => {
             if (this.advancedMode) {
-                this._sendAdvancedChunks(0);
+                this._sendAdvancedChunks(offset);
             } else {
-                this._sendChunksStandard(0);
+                this._sendChunksStandard(offset);
             }
         }, delay);
+    }
+
+    sendChunks(offset = 0) {
+        const checkAndStart = () => {
+            const expectedCount = this.advancedMode ? PARALLEL_CHANNELS : 1;
+            const openChannels = this.advancedMode ? 
+                this.channels.filter(c => c.readyState === 'open') : 
+                (this.dataChannel?.readyState === 'open' ? [this.dataChannel] : []);
+
+            if (openChannels.length >= expectedCount) {
+                this._startSecurely(offset, 200);
+            } else {
+                console.log(`[Engine] Sender waiting for channels... (${openChannels.length}/${expectedCount})`);
+                setTimeout(checkAndStart, 200);
+            }
+        };
+        checkAndStart();
     }
 
     // ---- STANDARD CHUNK SENDER ----

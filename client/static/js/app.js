@@ -1,4 +1,4 @@
-import P2PTransfer from './webrtc.js';
+import P2PTransfer from './webrtc.js?v=2';
 
 let room_id = null;
 let cloud_id = null;
