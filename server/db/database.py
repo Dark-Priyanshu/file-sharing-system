@@ -5,7 +5,11 @@ import os
 
 # Get the absolute path of the project root
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DB_DIR = os.path.join(BASE_DIR, "data")
+if os.environ.get("VERCEL"):
+    DB_DIR = "/tmp/data"
+else:
+    DB_DIR = os.path.join(BASE_DIR, "data")
+
 os.makedirs(DB_DIR, exist_ok=True)
 db_path = os.path.join(DB_DIR, "ethershare.db")
 

@@ -149,7 +149,10 @@ def change_password(
     db.commit()
     return {"message": "Password changed successfully."}
 
-UPLOAD_DIR = os.path.join(BASE_DIR, "data", "uploads")
+if os.environ.get("VERCEL"):
+    UPLOAD_DIR = "/tmp/uploads"
+else:
+    UPLOAD_DIR = os.path.join(BASE_DIR, "data", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @app.post("/cloud/upload")
