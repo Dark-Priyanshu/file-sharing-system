@@ -142,7 +142,6 @@ def change_password(
 @app.post("/cloud/upload")
 async def upload_cloud_file(file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        name_without_ext = os.path.splitext(file.filename)[0]
         folder_id = str(uuid.uuid4())[:8]
 
         # We upload the file directly to Cloudinary securely capturing exact filename
@@ -150,7 +149,7 @@ async def upload_cloud_file(file: UploadFile = File(...), current_user: User = D
             file.file, 
             resource_type="auto",
             folder=f"ethershare/{folder_id}",
-            public_id=name_without_ext,
+            public_id=file.filename,
             use_filename=True,
             unique_filename=False,
             display_name=file.filename
