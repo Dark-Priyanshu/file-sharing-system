@@ -1,7 +1,8 @@
 fastapi
 uvicorn
 sqlalchemy
-aiofiles
+cloudinary
 python-multipart
 pyjwt
 bcrypt
+python-dotenv

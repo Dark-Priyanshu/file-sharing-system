@@ -60,7 +60,7 @@ class P2PTransfer {
         this.peerConnection.oniceconnectionstatechange = () => {
             const s = this.peerConnection.iceConnectionState;
             console.log('ICE state:', s);
-            if (s === 'disconnected' || s === 'failed') {
+            if (s === 'failed') {
                 if ((this.role === 'receiver' && this.receivedSize < this.totalSize) ||
                     (this.role === 'sender' && this.file)) {
                     this.onError(new Error('Connection lost'));

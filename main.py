@@ -1,16 +1,19 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
 from fastapi.encoders import jsonable_encoder
-from typing import Dict, List
 import json
 import uuid
 import os
 import asyncio
 from datetime import datetime, timezone
-import aiofiles
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, JSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from fastapi import Request
+import traceback
+import cloudinary
+import cloudinary.uploader
 
 # Import our new modules
 from db.database import engine, Base, get_db, SessionLocal
@@ -18,15 +21,18 @@ from db.models import User, CloudFile
 from auth.auth import verify_password, get_password_hash, create_access_token, SECRET_KEY, ALGORITHM
 import jwt
 from jwt.exceptions import InvalidTokenError
+from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+load_dotenv()
 
-"""
-Main Entry Point for EtherShare Server.
-Handles user authentication, cloud file management, and P2P signaling.
-"""
+# Cloudinary Setup
+cloudinary.config(
+    cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.environ.get("CLOUDINARY_API_KEY"),
+    api_secret=os.environ.get("CLOUDINARY_API_SECRET")
+)
 
 Base.metadata.create_all(bind=engine)
-
-from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,30 +42,28 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-from fastapi import Request
-from fastapi.responses import JSONResponse
-import traceback
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     err = traceback.format_exc()
     print("CRITICAL ERROR:", err)
-    return JSONResponse(status_code=500, content={"detail": err})
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
 
-# Get the absolute path of the current directory
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Mount static files
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "client", "static")), name="static")
-app.mount("/config", StaticFiles(directory=os.path.join(BASE_DIR, "config")), name="config")
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    """
-    Dependency to validate the JWT token and return the current user object.
-    Raises 401 Unauthorized if token is invalid or user doesn't exist.
-    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -78,10 +82,6 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 async def cleanup_expired_files():
-    """
-    Background task that periodically checks for and deletes expired cloud files.
-    Runs every 5 minutes and removes both the database record and the physical file.
-    """
     while True:
         db = None
         try:
@@ -90,11 +90,11 @@ async def cleanup_expired_files():
             now = datetime.now(timezone.utc)
             expired_files = db.query(CloudFile).filter(CloudFile.expires_at < now).all()
             for ef in expired_files:
-                if os.path.exists(ef.file_path):
+                if ef.public_id:
                     try:
-                        os.remove(ef.file_path)
-                    except:
-                        pass
+                        cloudinary.uploader.destroy(ef.public_id)
+                    except Exception as e:
+                        print("Failed to delete from Cloudinary:", e)
                 db.delete(ef)
             db.commit()
         except Exception as e:
@@ -102,16 +102,10 @@ async def cleanup_expired_files():
         finally:
             if db:
                 db.close()
-        await asyncio.sleep(60 * 5) # Check every 5 minutes
-
-# Lifespan startup task is handled globally above.
+        await asyncio.sleep(60 * 5)
 
 @app.post("/auth/register")
 def register(email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
-    """
-    Registers a new user with email and password.
-    Enforces a minimum password length of 6 characters.
-    """
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(status_code=409, detail="An account with this email already exists.")
     if len(password) < 6:
@@ -124,10 +118,6 @@ def register(email: str = Form(...), password: str = Form(...), db: Session = De
 
 @app.post("/auth/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    """
-    Authenticates a user and returns an OAuth2 compatible access token.
-    Uses Bearer token authentication.
-    """
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Incorrect email or password")
@@ -149,54 +139,39 @@ def change_password(
     db.commit()
     return {"message": "Password changed successfully."}
 
-if os.environ.get("VERCEL"):
-    UPLOAD_DIR = "/tmp/uploads"
-else:
-    UPLOAD_DIR = os.path.join(BASE_DIR, "data", "uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
 @app.post("/cloud/upload")
 async def upload_cloud_file(file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """
-    Uploads a file to the secure cloud store.
-    Files are temporarily stored and automatically deleted after 24 hours.
-    Enforces a 500MB size limit.
-    """
-    file_id = str(uuid.uuid4())
-    ext = os.path.splitext(file.filename)[1]
-    safe_path = os.path.join(UPLOAD_DIR, f"{file_id}{ext}")
-    
-    total_size = 0
-    MAX_SIZE = 500 * 1024 * 1024 # 500 MB limit
-    
     try:
-        async with aiofiles.open(safe_path, 'wb') as out_file:
-            while chunk := await file.read(1024 * 1024): # 1MB chunks
-                total_size += len(chunk)
-                if total_size > MAX_SIZE:
-                    raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 500MB.")
-                await out_file.write(chunk)
-    except HTTPException as e:
-        os.remove(safe_path)
-        raise e
+        # We upload the file directly to Cloudinary
+        result = cloudinary.uploader.upload(
+            file.file, 
+            resource_type="auto",
+            use_filename=True,
+            unique_filename=True,
+            display_name=file.filename
+        )
+        file_url = result.get("secure_url")
+        public_id = result.get("public_id")
+        file_size = result.get("bytes", 0)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
         
     db_file = CloudFile(
-        id=file_id, 
+        id=str(uuid.uuid4()), 
         filename=file.filename,
-        file_path=safe_path,
+        file_url=file_url,
+        public_id=public_id,
         mime_type=file.content_type,
-        size_bytes=total_size,
+        size_bytes=file_size,
         uploader_id=current_user.id
     )
     db.add(db_file)
     db.commit()
-    return {"cloud_id": file_id, "expires_at": db_file.expires_at}
+    return {"cloud_id": db_file.id, "expires_at": db_file.expires_at}
 
 @app.get("/cloud/myfiles")
 async def get_my_files(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     files = db.query(CloudFile).filter(CloudFile.uploader_id == current_user.id).all()
-    # Format the payload for the frontend
-    # Use jsonable_encoder to handle DateTime serialization
     return jsonable_encoder([{"id": f.id, "filename": f.filename, "size_bytes": f.size_bytes, "expires_at": f.expires_at} for f in files])
 
 @app.delete("/cloud/{cloud_id}")
@@ -205,11 +180,11 @@ async def delete_my_file(cloud_id: str, current_user: User = Depends(get_current
     if not db_file:
         raise HTTPException(status_code=404, detail="File not found or unauthorized")
         
-    if os.path.exists(db_file.file_path):
+    if db_file.public_id:
         try:
-            os.remove(db_file.file_path)
-        except:
-            pass
+            cloudinary.uploader.destroy(db_file.public_id)
+        except Exception as e:
+            print("Failed to delete from Cloudinary:", e)
             
     db.delete(db_file)
     db.commit()
@@ -220,7 +195,16 @@ async def download_cloud_file(cloud_id: str, db: Session = Depends(get_db)):
     db_file = db.query(CloudFile).filter(CloudFile.id == cloud_id).first()
     if not db_file:
         raise HTTPException(status_code=404, detail="File not found or expired")
-    return FileResponse(path=db_file.file_path, filename=db_file.filename, media_type=db_file.mime_type)
+    
+    url = db_file.file_url
+    # Force the browser to download with the exact original filename
+    import urllib.parse
+    safe_filename = urllib.parse.quote(db_file.filename)
+    if "/upload/" in url:
+        url = url.replace("/upload/", f"/upload/fl_attachment:{safe_filename}/")
+        
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=url)
 
 @app.get("/cloud/metadata/{cloud_id}")
 async def get_cloud_metadata(cloud_id: str, db: Session = Depends(get_db)):
@@ -231,72 +215,67 @@ async def get_cloud_metadata(cloud_id: str, db: Session = Depends(get_db)):
 
 @app.get("/")
 async def get_index():
-    return FileResponse(os.path.join(BASE_DIR, "client", "index.html"))
+    return FileResponse(os.path.join(BASE_DIR, "templates", "index.html"))
 
 @app.get("/live/{room_id}")
 async def get_live_page(room_id: str):
-    return FileResponse(os.path.join(BASE_DIR, "client", "index.html"))
+    return FileResponse(os.path.join(BASE_DIR, "templates", "live.html"))
 
 @app.get("/download/{cloud_id}")
 async def get_download_page(cloud_id: str):
-    return FileResponse(os.path.join(BASE_DIR, "client", "index.html"))
+    return FileResponse(os.path.join(BASE_DIR, "templates", "download.html"))
 
 @app.get('/favicon.ico', include_in_schema=False)
 async def favicon():
     return Response(content=b"", media_type="image/x-icon")
 
-# In-memory storage for signaling
-rooms: Dict[str, List[WebSocket]] = {}
-room_metadata: Dict[str, dict] = {} # New: Store room settings like advanced_mode
+# In-memory storage for HTTP polling signaling
+rooms_messages: dict[str, list[dict]] = {}
+room_clients: dict[str, set] = {}
+room_metadata: dict[str, dict] = {} # New: Store room settings like advanced_mode
 
-@app.websocket("/ws/{room_id}")
-async def websocket_endpoint(websocket: WebSocket, room_id: str):
-    """
-    WebSocket endpoint for P2P signaling.
-    Relays WebRTC handshake messages (offers, answers, candidates) between peers in a room.
-    Supports a maximum of 2 peers per room.
-    """
-    await websocket.accept()
+@app.post("/signal/{room_id}/join")
+async def join_room(room_id: str, payload: dict):
+    client_id = payload.get("client_id")
+    if not client_id:
+        raise HTTPException(status_code=400, detail="Missing client_id")
+
+    if room_id not in rooms_messages:
+        rooms_messages[room_id] = []
+        room_clients[room_id] = set()
     
-    if room_id not in rooms:
-        rooms[room_id] = []
+    room_clients[room_id].add(client_id)
+    print(f"Client {client_id} joined room: {room_id}. Total users: {len(room_clients[room_id])}")
     
-    if len(rooms[room_id]) >= 2:
-        await websocket.send_text(json.dumps({"type": "error", "message": "Room is full"}))
-        await websocket.close()
-        return
-    
-    rooms[room_id].append(websocket)
-    print(f"User joined room: {room_id}. Total users: {len(rooms[room_id])}")
-    
-    # Notify others in the room
-    if len(rooms[room_id]) == 2:
+    if len(room_clients[room_id]) == 2:
         metadata = room_metadata.get(room_id, {"advanced": False})
-        for client in rooms[room_id]:
-            await client.send_text(json.dumps({
-                "type": "ready", 
-                "room_id": room_id,
-                "advanced": metadata.get("advanced", False)
-            }))
+        ready_msg = {
+            "type": "ready", 
+            "room_id": room_id,
+            "advanced": metadata.get("advanced", False),
+            "sender_id": "server"
+        }
+        if not any(msg.get("type") == "ready" for msg in rooms_messages[room_id]):
+            rooms_messages[room_id].append(ready_msg)
 
-    try:
-        while True:
-            data = await websocket.receive_text()
-            message = json.loads(data)
-            
-            # Relay message to the other peer in the room
-            for client in rooms[room_id]:
-                if client != websocket:
-                    await client.send_text(json.dumps(message))
-    except WebSocketDisconnect:
-        rooms[room_id].remove(websocket)
-        if not rooms[room_id]:
-            del rooms[room_id]
-        print(f"User left room: {room_id}")
-    except Exception as e:
-        print(f"Error in room {room_id}: {e}")
-        if websocket in rooms[room_id]:
-            rooms[room_id].remove(websocket)
+    return {"status": "joined", "client_count": len(room_clients[room_id])}
+
+@app.post("/signal/{room_id}/send")
+async def send_signal(room_id: str, message: dict):
+    if room_id not in rooms_messages:
+        rooms_messages[room_id] = []
+        room_clients[room_id] = set()
+    
+    rooms_messages[room_id].append(message)
+    return {"status": "sent"}
+
+@app.get("/signal/{room_id}/poll")
+async def poll_signal(room_id: str, last_index: int = 0):
+    if room_id not in rooms_messages:
+        return {"messages": [], "last_index": 0}
+    
+    messages = rooms_messages[room_id][last_index:]
+    return {"messages": messages, "last_index": len(rooms_messages[room_id])}
 
 @app.get("/create_room")
 async def create_room(advanced: bool = False):
@@ -304,6 +283,7 @@ async def create_room(advanced: bool = False):
     room_metadata[room_id] = {"advanced": advanced}
     return {"room_id": room_id}
 
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=10000)
