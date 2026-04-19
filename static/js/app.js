@@ -3,7 +3,9 @@ import P2PTransfer from './webrtc.js?v=2';
 let room_id = null;
 let cloud_id = null;
 let role = 'sender'; 
-let websocket = null;
+let clientId = Math.random().toString(36).substring(2, 10);
+let pollingTimer = null;
+let lastPollIndex = 0;
 let p2p = null;
 let currentFile = null;
 let startTime = 0;
@@ -470,7 +472,7 @@ elements.methodP2p?.addEventListener('click', async () => {
         elements.fileNameLabel.innerText = currentFile.name;
         elements.fileInfoLabel.innerText = `${formatBytes(currentFile.size)} • ${currentFile.type || 'Unknown Type'}`;
         
-        setupWebSocket(room_id);
+        setupSignaling(room_id);
         
         const url = `${window.location.origin}/live/${room_id}`;
         elements.shareUrl.innerText = url;
@@ -541,59 +543,97 @@ elements.methodCloud?.addEventListener('click', async () => {
 });
 // ----------------------------------
 
-function setupWebSocket(id) {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    websocket = new WebSocket(`${protocol}//${host}/ws/${id}`);
+async function setupSignaling(id) {
+    console.log('Signaling: HTTP Polling started');
     
-    websocket.onopen = () => console.log('Signaling: Connected');
-    websocket.onmessage = async (event) => {
-        const data = JSON.parse(event.data);
-        switch (data.type) {
-            case 'ready':
-                // Sync advanced mode from signaling sender
-                if (data.advanced !== undefined) {
-                    advancedTransferMode = data.advanced;
+    try {
+        await fetch(`/signal/${id}/join`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ client_id: clientId })
+        });
+    } catch (err) {
+        console.error('Failed to join room', err);
+    }
+
+    if (pollingTimer) clearTimeout(pollingTimer);
+    
+    const poll = async () => {
+        try {
+            const res = await fetch(`/signal/${id}/poll?last_index=${lastPollIndex}`);
+            if (res.ok) {
+                const data = await res.json();
+                lastPollIndex = data.last_index;
+                for (const msg of data.messages) {
+                    if (msg.sender_id === clientId && msg.type !== 'ready') continue;
+                    await handleSignalMessage(msg);
                 }
-                await startHandshake();
-                if (role === 'sender') {
-                    if (currentFile) p2p.startTransfer(currentFile);
-                    const offer = await p2p.createOffer();
-                    websocket.send(JSON.stringify({ type: 'offer', offer }));
-                }
-                break;
-            case 'offer':
-                await startHandshake();
-                const answer = await p2p.handleOffer(data.offer);
-                websocket.send(JSON.stringify({ type: 'answer', answer }));
-                break;
-            case 'answer':
-                await startHandshake();
-                await p2p.handleAnswer(data.answer);
-                break;
-            case 'candidate':
-                await startHandshake();
-                await p2p.handleCandidate(data.candidate);
-                break;
-            case 'start':
-                if (role === 'sender') {
-                    startTransferUI(0);
-                }
-                break;
-            case 'resume':
-                if (role === 'sender') {
-                    startTransferUI(data.offset || 0);
-                }
-                break;
+            }
+        } catch (err) {
+            console.error('Poll error', err);
         }
+        pollingTimer = setTimeout(poll, 300); // 300ms for fast ICE exchange
     };
+    poll();
+}
+
+async function sendSignalMsg(msg) {
+    if (!room_id) return;
+    try {
+        await fetch(`/signal/${room_id}/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({...msg, sender_id: clientId})
+        });
+    } catch(err) {
+        console.error('Signal sending failed:', err);
+    }
+}
+
+async function handleSignalMessage(data) {
+    switch (data.type) {
+        case 'ready':
+            if (data.advanced !== undefined) {
+                advancedTransferMode = data.advanced;
+            }
+            await startHandshake();
+            if (role === 'sender') {
+                if (currentFile) p2p.startTransfer(currentFile);
+                const offer = await p2p.createOffer();
+                sendSignalMsg({ type: 'offer', offer });
+            }
+            break;
+        case 'offer':
+            await startHandshake();
+            const answer = await p2p.handleOffer(data.offer);
+            sendSignalMsg({ type: 'answer', answer });
+            break;
+        case 'answer':
+            await startHandshake();
+            await p2p.handleAnswer(data.answer);
+            break;
+        case 'candidate':
+            await startHandshake();
+            await p2p.handleCandidate(data.candidate);
+            break;
+        case 'start':
+            if (role === 'sender') {
+                startTransferUI(0);
+            }
+            break;
+        case 'resume':
+            if (role === 'sender') {
+                startTransferUI(data.offset || 0);
+            }
+            break;
+    }
 }
 
 function onMetadataReceived(data) {
     if (p2p && p2p.receivedSize > 0 && p2p.fileName === data.name) {
         console.log('Auto-resuming transfer...');
         if (elements.statusText) elements.statusText.innerText = "Resuming transfer...";
-        websocket.send(JSON.stringify({ type: 'resume', offset: p2p.receivedSize }));
+        sendSignalMsg({ type: 'resume', offset: p2p.receivedSize });
         return;
     }
     elements.rcvFileName.innerText = data.name;
@@ -615,9 +655,7 @@ async function startHandshake() {
     handshakePromise = (async () => {
         p2p = new P2PTransfer(role, updateProgress, onTransferComplete, onTransferError, onMetadataReceived, advancedTransferMode);
         p2p.onSignal = (msg) => {
-            if (websocket?.readyState === WebSocket.OPEN) {
-                websocket.send(JSON.stringify(msg));
-            }
+            sendSignalMsg(msg);
         };
 
         const configRes = await fetch('/config/stun_servers.json');
@@ -664,24 +702,29 @@ function onTransferComplete(blob, name) {
     switchView('success');
 }
 
+let reconnectLock = false;
+
 async function autoReconnectWebRTC() {
+    if (reconnectLock) return;
+    reconnectLock = true;
     if (elements.statusText) elements.statusText.innerText = "Connection lost. Attempting to resume...";
+    handshakePromise = null; // Allow fresh handshake
     try {
         const configRes = await fetch('/config/stun_servers.json');
         const iceServers = await configRes.json();
-        await p2p.resetConnection(iceServers);
-        
-        if (!websocket || websocket.readyState !== WebSocket.OPEN) {
-            console.log("WebSocket dropped, reconnecting...");
-            setupWebSocket(room_id);
-        } else {
-            if (role === 'sender') {
-                const offer = await p2p.createOffer();
-                websocket.send(JSON.stringify({ type: 'offer', offer }));
-            }
+        if (p2p) {
+            await p2p.resetConnection(iceServers);
+            p2p.onSignal = (msg) => { sendSignalMsg(msg); };
+        }
+        if (role === 'sender' && currentFile) {
+            p2p.startTransfer(currentFile);
+            const offer = await p2p.createOffer();
+            sendSignalMsg({ type: 'offer', offer });
         }
     } catch (err) {
         console.error("Resume failed:", err);
+    } finally {
+        setTimeout(() => { reconnectLock = false; }, 5000); // Allow retry after 5s
     }
 }
 
@@ -719,7 +762,7 @@ elements.copyBtn?.addEventListener('click', () => {
     }).catch(err => console.error('Failed to copy', err));
 });
 elements.acceptBtn?.addEventListener('click', () => {
-    websocket.send(JSON.stringify({ type: 'start' }));
+    sendSignalMsg({ type: 'start' });
     switchView('transfer');
     elements.transferFileName.innerText = elements.rcvFileName.innerText;
     elements.transferFileInfo.innerText = elements.rcvFileInfo.innerText;
@@ -746,7 +789,7 @@ window.onload = async () => {
     if (roomParam) {
         room_id = roomParam;
         role = 'receiver';
-        setupWebSocket(room_id);
+        setupSignaling(room_id);
         switchView('receive');
     } else if (cloudParam) {
         role = 'receiver';

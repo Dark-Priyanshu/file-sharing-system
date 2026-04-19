@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>EtherShare | Peer-to-Peer Encrypted File Sharing</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "primary-container": "#00d1ff",
+                      "outline-variant": "#3c494e",
+                      "on-tertiary-container": "#004f90",
+                      "primary": "#a4e6ff",
+                      "secondary": "#d8b9ff",
+                      "surface": "#131314",
+                      "on-surface": "#e5e2e3",
+                      "on-surface-variant": "#bbc9cf",
+                      "surface-container-low": "#1c1b1c",
+                      "surface-container-high": "#2a2a2b",
+                      "surface-container-highest": "#353436",
+                      "surface-container-lowest": "#0e0e0f",
+              },
+              "borderRadius": {
+                      "lg": "1.0rem",
+                      "xl": "1.5rem",
+                      "full": "9999px"
+              },
+              "fontFamily": {
+                      "headline": ["Manrope"],
+                      "body": ["Inter"]
+              }
+            },
+          },
+        }
+    </script>
+    <style>
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .glass-panel { background: rgba(53, 52, 54, 0.4); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px); border: 1px solid rgba(60, 73, 78, 0.15); }
+        .neon-glow { box-shadow: 0 0 15px rgba(164, 230, 255, 0.4); }
+        .bg-ether { background: radial-gradient(circle at 50% -20%, #1c1b1c 0%, #131314 100%); }
+        .ghost-border { border: 1px solid rgba(60, 73, 78, 0.15); }
+
+        /* Profile Dropdown */
+        #profile-dropdown {
+            display: none;
+            position: absolute;
+            top: calc(100% + 12px);
+            right: 0;
+            min-width: 220px;
+            background: rgba(28, 27, 28, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(164,230,255,0.05);
+            z-index: 200;
+            overflow: hidden;
+            animation: dropIn 0.2s ease;
+        }
+        @keyframes dropIn {
+            from { opacity: 0; transform: translateY(-8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        #profile-dropdown.open { display: block; }
+        .dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 18px;
+            font-size: 14px;
+            font-family: 'Manrope', sans-serif;
+            font-weight: 600;
+            color: #bbc9cf;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+        }
+        .dropdown-item:hover { background: rgba(164,230,255,0.07); color: #e5e2e3; }
+        .dropdown-item.danger:hover { background: rgba(255,80,80,0.1); color: #ff6b6b; }
+        .dropdown-divider { height: 1px; background: rgba(255,255,255,0.06); margin: 4px 0; }
+        #avatar-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(164,230,255,0.06);
+            border: 1px solid rgba(164,230,255,0.12);
+            border-radius: 50px;
+            padding: 6px 14px 6px 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        #avatar-btn:hover { background: rgba(164,230,255,0.12); border-color: rgba(164,230,255,0.25); }
+        .animate-float { animation: float 6s ease-in-out infinite; }
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-20px); }
+            100% { transform: translateY(0px); }
+        }
+        .avatar-circle {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #a4e6ff, #d8b9ff);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 14px;
+            color: #131314;
+            font-family: 'Manrope', sans-serif;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body class="bg-surface text-on-surface font-body selection:bg-primary/30 min-h-screen flex flex-col overflow-x-hidden">
+    <!-- Shared NavBar -->
+    <nav class="fixed top-0 w-full z-50 bg-[#131314]/80 backdrop-blur-xl shadow-[0px_20px_50px_rgba(164,230,255,0.08)]">
+        <div class="max-w-7xl mx-auto px-8 py-4 flex justify-between items-center w-full">
+            <div id="nav-logo" class="cursor-pointer text-2xl font-['Manrope'] font-bold bg-clip-text text-transparent bg-gradient-to-r from-[#a4e6ff] to-[#d8b9ff]">
+                EtherShare
+            </div>
+            <div class="hidden md:flex items-center gap-8">
+                <button id="nav-how" class="font-['Manrope'] font-semibold tracking-tight text-[#e5e2e3]/70 hover:text-[#e5e2e3] transition-colors">How it Works</button>
+                <button id="nav-security" class="font-['Manrope'] font-semibold tracking-tight text-[#e5e2e3]/70 hover:text-[#e5e2e3] transition-colors">Security</button>
+            </div>
+            <div id="auth-unlogged" class="flex gap-4">
+                <button id="login-btn" class="text-primary font-semibold hover:brightness-110 active:scale-95 transition-all">Sign In</button>
+                <button id="register-btn" class="bg-gradient-to-br from-primary to-secondary px-6 py-2 rounded-lg text-on-primary-fixed font-semibold active:scale-95 transition-transform hover:brightness-110">Get Started</button>
+            </div>
+            <!-- Logged In: Profile Avatar Dropdown -->
+            <div id="auth-logged" class="hidden relative items-center">
+                <button id="avatar-btn" aria-label="User Menu">
+                    <div class="avatar-circle" id="avatar-initials">?</div>
+                    <span id="user-email-display" class="hidden md:block text-sm font-semibold text-on-surface max-w-[140px] truncate"></span>
+                    <span class="material-symbols-outlined text-on-surface-variant" style="font-size:18px;">expand_more</span>
+                </button>
+                <div id="profile-dropdown">
+                    <div class="px-4 py-3 border-b border-white/5">
+                        <p class="text-xs text-on-surface-variant uppercase tracking-widest mb-1">Signed in as</p>
+                        <p id="dropdown-email" class="text-sm font-bold text-on-surface truncate"></p>
+                    </div>
+                    <div class="py-1">
+                        <button id="profile-btn" class="dropdown-item">
+                            <span class="material-symbols-outlined" style="font-size:18px; color:#a4e6ff;">dashboard</span>
+                            My Dashboard
+                        </button>
+                    </div>
+                    <div class="dropdown-divider"></div>
+                    <div class="py-1">
+                        <button id="logout-btn" class="dropdown-item danger">
+                            <span class="material-symbols-outlined" style="font-size:18px;">logout</span>
+                            Sign Out
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Auth Modals -->
+    <div id="auth-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div class="glass-panel p-8 rounded-xl w-full max-w-sm border border-outline-variant/30 space-y-6 relative">
+            <button id="close-auth-modal" class="absolute top-4 right-4 text-on-surface hover:text-primary material-symbols-outlined">close</button>
+            <h2 id="auth-title" class="font-headline text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary">Sign In</h2>
+            <form id="auth-form" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-widest mb-1">Email</label>
+                    <input type="email" id="auth-email" required class="w-full bg-surface-container-highest border border-outline-variant/50 rounded-lg px-4 py-3 text-on-surface outline-none focus:border-primary transition-colors">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-widest mb-1">Password</label>
+                    <input type="password" id="auth-password" required class="w-full bg-surface-container-highest border border-outline-variant/50 rounded-lg px-4 py-3 text-on-surface outline-none focus:border-primary transition-colors">
+                </div>
+                <button type="submit" id="auth-submit" class="w-full bg-gradient-to-r from-primary to-secondary text-on-primary-fixed font-bold py-3 rounded-lg hover:brightness-110 active:scale-95 transition-all mt-4">Sign In</button>
+            </form>
+            <p class="text-sm text-center text-on-surface-variant">
+                <span id="auth-toggle-text">Don't have an account?</span> 
+                <button id="auth-toggle-btn" class="text-primary font-semibold hover:underline">Sign Up</button>
+            </p>
+        </div>
+    </div>
+
+    <main class="flex-grow pt-24 relative overflow-hidden bg-ether">
+        <!-- Atmospheric Background Elements -->
+        <div class="absolute top-1/4 -left-20 w-96 h-96 bg-primary/10 rounded-full blur-[120px] pointer-events-none"></div>
+        <div class="absolute bottom-1/4 -right-20 w-80 h-80 bg-secondary/10 rounded-full blur-[100px] pointer-events-none"></div>
+
+        <!-- 1. LANDING VIEW -->
+        <section id="landing-view" class="max-w-7xl mx-auto px-8 grid grid-cols-1 lg:grid-cols-12 gap-16 items-center py-12">
+            <div class="lg:col-span-6 space-y-8">
+                <h1 class="font-headline text-6xl md:text-7xl font-extrabold tracking-tight leading-tight">
+                    Weightless <br/>
+                    <span class="text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary">Data Sharing.</span>
+                </h1>
+                <p class="text-lg text-on-surface-variant max-w-xl leading-relaxed">
+                    Peer-to-peer file transfers with end-to-end encryption. No size limits, no storage silos, just pure fluid connectivity across the digital ether.
+                </p>
+            </div>
+            <div class="lg:col-span-6">
+                <div class="relative group">
+                    <div class="absolute -inset-1 bg-gradient-to-r from-primary/20 to-secondary/20 rounded-xl blur opacity-25 group-hover:opacity-50 transition duration-1000"></div>
+                    <div id="drop-zone" class="relative glass-panel rounded-xl p-12 flex flex-col items-center justify-center min-h-[450px] text-center transition-all duration-300 hover:border-primary/30">
+                        <div class="w-24 h-24 mb-8 rounded-full bg-surface-container-high flex items-center justify-center text-primary relative">
+                            <span class="material-symbols-outlined text-5xl" style="font-variation-settings: 'FILL' 1;">upload_file</span>
+                            <div class="absolute inset-0 bg-primary/20 blur-xl rounded-full"></div>
+                        </div>
+                        <h2 class="font-headline text-3xl font-bold mb-4">Ready to share?</h2>
+                        <p class="text-on-surface-variant mb-10 max-w-xs">Drag and drop your files here or use the button below to browse.</p>
+                        <button id="select-btn" class="bg-gradient-to-br from-primary to-secondary text-on-primary-fixed font-headline font-bold px-10 py-4 rounded-lg shadow-lg hover:brightness-110 active:scale-95 transition-all">
+                            Select File
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 2. SHARE LINK VIEW (Hidden) -->
+        <section id="share-view" class="hidden max-w-4xl mx-auto px-8 grid grid-cols-1 md:grid-cols-12 gap-8 items-start py-12">
+            <div class="md:col-span-7 space-y-6">
+                <h1 class="font-headline text-5xl font-bold text-on-surface tracking-tight leading-tight">Your file is ready <br/><span class="text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary">to travel.</span></h1>
+                <div class="glass-panel ghost-border rounded-xl p-6 flex items-center gap-6 group hover:bg-surface-container-high transition-all">
+                    <div class="w-16 h-16 rounded-lg bg-primary-container/20 flex items-center justify-center text-primary-container">
+                        <span class="material-symbols-outlined text-4xl">description</span>
+                    </div>
+                    <div class="flex-grow">
+                        <h3 id="file-name-label" class="font-headline text-xl font-semibold text-neutral-100">...</h3>
+                        <p id="file-info-label" class="text-on-surface-variant font-body text-sm mt-1">...</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3 px-2">
+                    <div class="relative flex h-3 w-3">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
+                    </div>
+                    <span class="text-sm font-semibold text-primary tracking-wide">Waiting for receiver to connect...</span>
+                </div>
+            </div>
+            <div class="md:col-span-5 space-y-4">
+                <div class="bg-surface-container-low rounded-xl p-8 space-y-8 ghost-border">
+                    <div class="flex flex-col items-center justify-center space-y-4">
+                        <div class="p-4 bg-white rounded-xl shadow-2xl">
+                             <!-- QR Placeholder -->
+                             <div id="qrcode" class="w-40 h-40 bg-neutral-200"></div>
+                        </div>
+                        <p class="text-xs font-label text-on-surface-variant uppercase tracking-widest">Share this link</p>
+                    </div>
+                    <div class="space-y-3 text-center">
+                        <div class="bg-surface-container-highest px-4 py-3 rounded-lg flex items-center justify-between">
+                            <span id="share-url" class="text-primary font-body font-medium truncate w-full">...</span>
+                        </div>
+                        <button id="copy-btn" class="w-full py-4 rounded-lg bg-gradient-to-r from-primary to-secondary text-surface font-headline font-bold text-lg hover:brightness-110 active:scale-[0.98] transition-all">
+                            Copy Link
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 2.5 CLOUD OR P2P SELECTOR VIEW (Hidden) -->
+        <section id="method-view" class="hidden max-w-4xl mx-auto px-8 py-20 text-center">
+            <div class="mb-12">
+                <h2 class="font-headline text-4xl font-bold">Select Transfer Method</h2>
+                <p id="method-file-name" class="text-on-surface-variant mt-2 text-lg">...</p>
+                <button id="method-back-btn" class="mt-4 px-6 py-2 rounded-lg border border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-high transition-all">← Choose a different file</button>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-stretch">
+                <!-- P2P Option -->
+                <div id="method-p2p" class="glass-panel p-10 rounded-xl cursor-pointer hover:border-primary/50 transition-all active:scale-95 group">
+                <div class="w-20 h-20 mx-auto bg-surface-container-high rounded-full flex items-center justify-center text-primary mb-6 group-hover:scale-110 transition-transform">
+                    <span class="material-symbols-outlined text-4xl">wifi_tethering</span>
+                </div>
+                <h3 class="text-2xl font-headline font-bold mb-3">Live Peer-to-Peer</h3>
+                <p class="text-on-surface-variant text-sm">Direct, uncapped, encrypted stream. Receiver must be online now. Files are never stored on our servers.</p>
+            </div>
+
+            <!-- Cloud Option -->
+            <div id="method-cloud" class="glass-panel p-10 rounded-xl cursor-pointer hover:border-secondary/50 transition-all active:scale-95 group relative overflow-hidden">
+                <div id="cloud-lock" class="absolute inset-0 bg-black/60 flex flex-col items-center justify-center z-10 backdrop-blur-[2px]">
+                    <span class="material-symbols-outlined text-white text-3xl mb-2">lock</span>
+                    <span class="text-white text-sm font-bold">Sign In Required</span>
+                </div>
+                <div class="w-20 h-20 mx-auto bg-surface-container-high rounded-full flex items-center justify-center text-secondary mb-6 group-hover:scale-110 transition-transform">
+                    <span class="material-symbols-outlined text-4xl">cloud_upload</span>
+                </div>
+                <h3 class="text-2xl font-headline font-bold mb-3">24-Hour Cloud Store</h3>
+                <p class="text-on-surface-variant text-sm">Upload to server. Receiver can download any time within the next 24 hours via a secure HTTP link.</p>
+            </div>
+        </section>
+
+        <!-- 3. TRANSFER VIEW (Hidden) -->
+        <section id="transfer-view" class="hidden max-w-3xl mx-auto px-8 py-12">
+            <h1 class="font-headline text-5xl font-bold text-on-surface leading-tight tracking-tight mb-8">
+                Transmitting <span class="text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary">Data</span>
+            </h1>
+            <div class="glass-panel p-8 md:p-12 rounded-xl border border-outline-variant/15 shadow-xl">
+                <div class="flex items-start justify-between mb-10">
+                    <div class="flex items-center gap-5">
+                        <div class="w-16 h-16 bg-surface-container-high rounded-lg flex items-center justify-center">
+                            <span class="material-symbols-outlined text-primary text-4xl">description</span>
+                        </div>
+                        <div>
+                            <h2 id="transfer-file-name" class="font-headline text-2xl font-semibold text-on-surface">...</h2>
+                            <p id="transfer-file-info" class="text-on-surface-variant">...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="space-y-6">
+                    <div class="flex justify-between items-end mb-2">
+                        <span id="progress-percent" class="font-headline text-5xl font-extrabold text-on-surface tracking-tighter">0<span class="text-2xl text-primary">%</span></span>
+                        <div class="text-right">
+                            <p class="text-xs text-on-surface-variant uppercase tracking-widest">Status</p>
+                            <p id="status-text" class="font-headline text-xl text-on-surface font-semibold italic">Transferring...</p>
+                        </div>
+                    </div>
+                    <div class="relative h-4 w-full bg-surface-container-highest rounded-full overflow-hidden">
+                        <div id="progress-bar" class="absolute top-0 left-0 h-full w-0 bg-gradient-to-r from-primary to-secondary rounded-full neon-glow transition-all duration-300"></div>
+                    </div>
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mt-8">
+                        <div class="bg-surface-container-low p-4 rounded-lg">
+                            <p class="text-xs text-on-surface-variant mb-1">Uploaded</p>
+                            <p id="uploaded-bytes" class="font-headline font-bold text-on-surface">0 MB</p>
+                        </div>
+                        <div class="bg-surface-container-low p-4 rounded-lg">
+                            <p class="text-xs text-on-surface-variant mb-1">Stability</p>
+                            <p class="font-headline font-bold text-secondary">99.9%</p>
+                        </div>
+                        <div class="bg-surface-container-low p-4 rounded-lg">
+                            <p class="text-xs text-on-surface-variant mb-1">Encrypted</p>
+                            <p class="font-headline font-bold text-primary">AES-256</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 4. RECEIVE VIEW (Hidden) -->
+        <section id="receive-view" class="hidden max-w-3xl mx-auto px-8 py-12">
+             <div class="relative glass-panel rounded-xl border border-outline-variant/15 p-12 flex flex-col items-center justify-center min-h-[450px] text-center">
+                <div class="w-24 h-24 mb-8 rounded-full bg-surface-container-high flex items-center justify-center text-secondary relative">
+                    <span class="material-symbols-outlined text-5xl" style="font-variation-settings: 'FILL' 1;">download_for_offline</span>
+                    <div class="absolute inset-0 bg-secondary/20 blur-xl rounded-full"></div>
+                </div>
+                <h2 class="font-headline text-3xl font-bold mb-4 italic">Ready to receive?</h2>
+                <div class="mb-10 text-center">
+                    <h3 id="rcv-file-name" class="text-2xl font-bold text-on-surface">...</h3>
+                    <p id="rcv-file-info" class="text-on-surface-variant">Waiting for sender metadata...</p>
+                </div>
+                <button id="accept-btn" class="bg-gradient-to-br from-secondary to-primary text-surface font-headline font-bold px-12 py-4 rounded-lg shadow-lg hover:brightness-110 active:scale-95 transition-all">
+                    Accept & Download
+                </button>
+            </div>
+        </section>
+
+        <!-- 4.5 CLOUD RECEIVE VIEW (Hidden) -->
+        <section id="cloud-receive-view" class="hidden max-w-3xl mx-auto px-8 py-12">
+             <div class="relative glass-panel rounded-xl border border-outline-variant/15 p-12 flex flex-col items-center justify-center min-h-[450px] text-center">
+                <div class="w-24 h-24 mb-8 rounded-full bg-surface-container-high flex items-center justify-center text-primary relative">
+                    <span class="material-symbols-outlined text-5xl" style="font-variation-settings: 'FILL' 1;">cloud_download</span>
+                    <div class="absolute inset-0 bg-primary/20 blur-xl rounded-full"></div>
+                </div>
+                <h2 class="font-headline text-3xl font-bold mb-4 italic">Cloud File Ready</h2>
+                <div class="mb-10 text-center">
+                    <h3 id="cloud-rcv-file-name" class="text-2xl font-bold text-on-surface">...</h3>
+                    <p id="cloud-rcv-file-info" class="text-on-surface-variant">Loading metadata...</p>
+                </div>
+                <button id="cloud-download-btn" class="bg-gradient-to-br from-primary to-secondary text-surface font-headline font-bold px-12 py-4 rounded-lg shadow-lg hover:brightness-110 active:scale-95 transition-all">
+                    Direct Download
+                </button>
+            </div>
+        </section>
+
+        <!-- 5. COMPLETE VIEW (Hidden) -->
+        <section id="success-view" class="hidden max-w-2xl mx-auto px-8 py-12 text-center space-y-8">
+            <div class="w-24 h-24 mx-auto rounded-full bg-primary/20 flex items-center justify-center text-primary shadow-[0_0_50px_rgba(0,209,255,0.2)]">
+                <span class="material-symbols-outlined text-5xl" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+            </div>
+            <h2 class="font-headline text-display-lg font-bold text-on-surface tracking-tight">Transfer Complete!</h2>
+            <p id="success-msg" class="text-lg text-on-surface-variant leading-relaxed">The file has successfully travelled through the digital ether to its destination.</p>
+            <button id="download-btn" class="bg-gradient-to-br from-primary to-secondary text-on-primary-fixed font-headline font-bold px-8 py-3 rounded-lg hover:brightness-110 active:scale-95 transition-all" style="display:none;">Download File</button>
+        </section>
+
+        <!-- 6. DASHBOARD / PROFILE VIEW (Hidden) -->
+        <section id="profile-view" class="hidden max-w-6xl mx-auto px-8 py-12">
+            <div class="flex items-center justify-between mb-8">
+                <h2 class="font-headline text-4xl font-bold text-on-surface tracking-tight">Dashboard</h2>
+                <button id="profile-home-btn" class="px-6 py-2 rounded-lg border border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-high transition-all">← Back to Home</button>
+            </div>
+            <!-- Tabs -->
+            <div class="flex gap-1 mb-6 p-1 bg-surface-container-low rounded-xl w-fit">
+                <button id="tab-files-btn" class="profile-tab px-6 py-2 rounded-lg font-headline font-semibold text-sm transition-all bg-surface-container-high text-on-surface">
+                    <span class="material-symbols-outlined align-middle" style="font-size:16px; margin-right:4px;">cloud</span>My Files
+                </button>
+                <button id="tab-settings-btn" class="profile-tab px-6 py-2 rounded-lg font-headline font-semibold text-sm transition-all text-on-surface-variant">
+                    <span class="material-symbols-outlined align-middle" style="font-size:16px; margin-right:4px;">settings</span>Settings
+                </button>
+            </div>
+            <!-- FILES TAB -->
+            <div id="tab-files" class="glass-panel rounded-xl overflow-hidden border border-outline-variant/15">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse" id="myfiles-table">
+                        <thead>
+                            <tr class="bg-surface-container-high text-on-surface-variant border-b border-outline-variant/20">
+                                <th class="py-4 px-6 font-semibold">File Name</th>
+                                <th class="py-4 px-6 font-semibold">Size</th>
+                                <th class="py-4 px-6 font-semibold">Time Left</th>
+                                <th class="py-4 px-6 font-semibold">Share Link</th>
+                                <th class="py-4 px-6 font-semibold text-center">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-outline-variant/10 text-on-surface" id="myfiles-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <!-- SETTINGS TAB (hidden by default) -->
+            <div id="tab-settings" class="hidden space-y-6">
+                <!-- Change Password -->
+                <div class="glass-panel rounded-xl border border-outline-variant/15 p-8">
+                    <h3 class="font-headline text-xl font-bold text-on-surface mb-1">Change Password</h3>
+                    <p class="text-sm text-on-surface-variant mb-6">Update your account password. Min. 6 characters required.</p>
+                    <form id="change-password-form" class="space-y-4 max-w-md">
+                        <div>
+                            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-widest mb-1">Current Password</label>
+                            <input type="password" id="cp-current" required class="w-full bg-surface-container-highest border border-outline-variant/50 rounded-lg px-4 py-3 text-on-surface outline-none focus:border-primary transition-colors">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-widest mb-1">New Password</label>
+                            <input type="password" id="cp-new" required class="w-full bg-surface-container-highest border border-outline-variant/50 rounded-lg px-4 py-3 text-on-surface outline-none focus:border-primary transition-colors">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-widest mb-1">Confirm New Password</label>
+                            <input type="password" id="cp-confirm" required class="w-full bg-surface-container-highest border border-outline-variant/50 rounded-lg px-4 py-3 text-on-surface outline-none focus:border-primary transition-colors">
+                        </div>
+                        <div class="flex items-center gap-4 pt-2">
+                            <button type="submit" class="bg-gradient-to-r from-primary to-secondary text-on-primary-fixed font-bold px-8 py-3 rounded-lg hover:brightness-110 active:scale-95 transition-all">Update Password</button>
+                            <span id="cp-msg" class="text-sm font-semibold"></span>
+                        </div>
+                    </form>
+                </div>
+                <!-- Advanced Transfer -->
+                <div class="glass-panel rounded-xl border border-outline-variant/15 p-8">
+                    <div class="flex items-start justify-between mb-6">
+                        <div>
+                            <h3 class="font-headline text-xl font-bold text-on-surface mb-1">Advanced P2P Transfer Engine</h3>
+                            <p class="text-sm text-on-surface-variant max-w-xl">Turbo-charged peer-to-peer with multi-channel parallelism, adaptive bandwidth control, and automatic resume on disconnect.</p>
+                        </div>
+                        <button id="advanced-transfer-toggle" class="relative flex-shrink-0 w-14 h-7 rounded-full border border-outline-variant/40 bg-surface-container-highest transition-all duration-300 ml-8" aria-pressed="false">
+                            <span id="advanced-toggle-knob" class="absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-on-surface-variant transition-all duration-300"></span>
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3" id="advanced-features-grid">
+                        <div class="setting-feature flex items-center gap-3 px-4 py-3 rounded-lg bg-surface-container-low opacity-50 transition-all duration-300">
+                            <span class="material-symbols-outlined text-primary" style="font-size:20px;">splitscreen</span>
+                            <div class="flex-1"><p class="text-sm font-bold text-on-surface">Chunk-Based Transfer</p><p class="text-xs text-on-surface-variant">256KB adaptive chunks</p></div>
+                            <span class="material-symbols-outlined text-on-surface-variant check-icon" style="font-size:18px;">radio_button_unchecked</span>
+                        </div>
+                        <div class="setting-feature flex items-center gap-3 px-4 py-3 rounded-lg bg-surface-container-low opacity-50 transition-all duration-300">
+                            <span class="material-symbols-outlined text-secondary" style="font-size:20px;">account_tree</span>
+                            <div class="flex-1"><p class="text-sm font-bold text-on-surface">Parallel Channels</p><p class="text-xs text-on-surface-variant">3x concurrent data streams</p></div>
+                            <span class="material-symbols-outlined text-on-surface-variant check-icon" style="font-size:18px;">radio_button_unchecked</span>
+                        </div>
+                        <div class="setting-feature flex items-center gap-3 px-4 py-3 rounded-lg bg-surface-container-low opacity-50 transition-all duration-300">
+                            <span class="material-symbols-outlined text-primary" style="font-size:20px;">speed</span>
+                            <div class="flex-1"><p class="text-sm font-bold text-on-surface">Bandwidth Optimization</p><p class="text-xs text-on-surface-variant">Dynamic send-rate control</p></div>
+                            <span class="material-symbols-outlined text-on-surface-variant check-icon" style="font-size:18px;">radio_button_unchecked</span>
+                        </div>
+                        <div class="setting-feature flex items-center gap-3 px-4 py-3 rounded-lg bg-surface-container-low opacity-50 transition-all duration-300">
+                            <span class="material-symbols-outlined text-secondary" style="font-size:20px;">replay</span>
+                            <div class="flex-1"><p class="text-sm font-bold text-on-surface">Resume Failed Transfers</p><p class="text-xs text-on-surface-variant">Continue from last ACK offset</p></div>
+                            <span class="material-symbols-outlined text-on-surface-variant check-icon" style="font-size:18px;">radio_button_unchecked</span>
+                        </div>
+                    </div>
+                    <p id="advanced-mode-label" class="mt-5 text-xs text-on-surface-variant">Advanced Transfer: <span id="advanced-mode-status" class="font-bold">Disabled</span></p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 7. HOW IT WORKS VIEW (Hidden) -->
+        <section id="how-it-works-view" class="hidden max-w-7xl mx-auto px-8 py-24">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+                <div class="space-y-8">
+                    <div>
+                        <span class="inline-block px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-bold uppercase tracking-widest mb-4">Direct & Fast</span>
+                        <h2 class="font-headline text-5xl font-extrabold text-on-surface leading-tight">How Peer-to-Peer <br/>Transfer Works</h2>
+                        <p class="text-lg text-on-surface-variant leading-relaxed mt-6">EtherShare uses WebRTC technology to establish a direct, encrypted tunnel between your device and the recipient. Your files never touch a server, ensuring maximum speed and total privacy.</p>
+                    </div>
+                    
+                    <div class="space-y-6">
+                        <div class="flex gap-4 items-start">
+                            <div class="w-12 h-12 rounded-xl bg-surface-container-high border border-outline-variant/30 flex items-center justify-center flex-shrink-0">
+                                <span class="material-symbols-outlined text-primary">link</span>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-on-surface">1. Generate a Secure Link</h4>
+                                <p class="text-sm text-on-surface-variant">Simply drop your files and we'll create a unique room ID used for the handshake.</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-4 items-start">
+                            <div class="w-12 h-12 rounded-xl bg-surface-container-high border border-outline-variant/30 flex items-center justify-center flex-shrink-0">
+                                <span class="material-symbols-outlined text-secondary">share</span>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-on-surface">2. Share with Recipient</h4>
+                                <p class="text-sm text-on-surface-variant">Send the link to whoever needs the file. They just need to open it in their browser.</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-4 items-start">
+                            <div class="w-12 h-12 rounded-xl bg-surface-container-high border border-outline-variant/30 flex items-center justify-center flex-shrink-0">
+                                <span class="material-symbols-outlined text-primary">handshake</span>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-on-surface">3. Direct Handshake</h4>
+                                <p class="text-sm text-on-surface-variant">Once both are online, a direct P2P connection is formed. The file flows browser-to-browser.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="relative">
+                    <div class="absolute -inset-10 bg-primary/20 blur-[120px] rounded-full"></div>
+                    <img src="/static/img/how-it-works.png" alt="How it works" class="relative z-10 w-full rounded-2xl shadow-2xl animate-float"/>
+                </div>
+            </div>
+        </section>
+
+        <!-- 8. SECURITY VIEW (Hidden) -->
+        <section id="security-view" class="hidden max-w-7xl mx-auto px-8 py-24">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center flex-row-reverse">
+                <div class="relative lg:order-2">
+                    <div class="absolute -inset-10 bg-secondary/20 blur-[120px] rounded-full"></div>
+                    <img src="/static/img/security.png" alt="Security Illustration" class="relative z-10 w-full rounded-2xl shadow-2xl"/>
+                </div>
+                <div class="space-y-8 lg:order-1">
+                    <div>
+                        <span class="inline-block px-4 py-1.5 rounded-full bg-secondary/10 border border-secondary/20 text-secondary text-xs font-bold uppercase tracking-widest mb-4">Enterprise Grade</span>
+                        <h2 class="font-headline text-5xl font-extrabold text-on-surface leading-tight">Privacy in Every Bit</h2>
+                        <p class="text-lg text-on-surface-variant leading-relaxed mt-6">Safety is not a feature; it's our foundation. We use state-of-the-art encryption and a zero-retention policy to protect your digital assets.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        <div class="glass-panel p-6 rounded-2xl border border-white/5">
+                            <span class="material-symbols-outlined text-secondary mb-4" style="font-size:32px;">verified_user</span>
+                            <h4 class="font-bold text-on-surface mb-2">End-to-End Encryption</h4>
+                            <p class="text-xs text-on-surface-variant">All transfers are encrypted using AES-256 and TLS 1.3 standards. Even we can't see what you share.</p>
+                        </div>
+                        <div class="glass-panel p-6 rounded-2xl border border-white/5">
+                            <span class="material-symbols-outlined text-primary mb-4" style="font-size:32px;">history</span>
+                            <h4 class="font-bold text-on-surface mb-2">24h Auto-Cleanup</h4>
+                            <p class="text-xs text-on-surface-variant">Files uploaded to our secure store are automatically purged after 24 hours. No traces left.</p>
+                        </div>
+                        <div class="glass-panel p-6 rounded-2xl border border-white/5">
+                            <span class="material-symbols-outlined text-secondary mb-4" style="font-size:32px;">dns</span>
+                            <h4 class="font-bold text-on-surface mb-2">No File Storage (P2P)</h4>
+                            <p class="text-xs text-on-surface-variant">In Live mode, files are never saved on any server. They go directly from A to B.</p>
+                        </div>
+                        <div class="glass-panel p-6 rounded-2xl border border-white/5">
+                            <span class="material-symbols-outlined text-primary mb-4" style="font-size:32px;">fingerprint</span>
+                            <h4 class="font-bold text-on-surface mb-2">Unique Room IDs</h4>
+                            <p class="text-xs text-on-surface-variant">Rooms are identifier-protected and temporary, preventing unauthorized sniffing.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="w-full py-12 border-t border-[#3c494e]/15 bg-[#131314]">
+        <div class="max-w-7xl mx-auto px-8 flex flex-col md:flex-row justify-between items-center gap-6">
+            <div class="flex flex-col gap-2">
+                <span class="text-lg font-bold text-[#e5e2e3]">EtherShare</span>
+                <p class="font-inter text-sm text-[#e5e2e3]/50">© 2024 EtherShare. All data encrypted in the Ether.</p>
+            </div>
+            <div class="flex gap-8">
+                <a class="text-sm text-[#e5e2e3]/50 hover:text-primary transition-colors" href="#">Privacy Policy</a>
+                <a class="text-sm text-[#e5e2e3]/50 hover:text-primary transition-colors" href="#">Terms of Service</a>
+            </div>
+        </div>
+    </footer>
+
+    <script type="module" src="/static/js/app.js?v=2"></script>
+</body>
+</html>

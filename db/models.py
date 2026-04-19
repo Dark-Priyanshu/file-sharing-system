@@ -19,7 +19,8 @@ class CloudFile(Base):
 
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     filename = Column(String)
-    file_path = Column(String)
+    file_url = Column(String)
+    public_id = Column(String)
     mime_type = Column(String)
     size_bytes = Column(Float)
     

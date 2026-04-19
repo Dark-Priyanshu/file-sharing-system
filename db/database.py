@@ -3,15 +3,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 
-# Get the absolute path of the project root
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if os.environ.get("VERCEL"):
-    DB_DIR = "/tmp/data"
-else:
-    DB_DIR = os.path.join(BASE_DIR, "data")
-
-os.makedirs(DB_DIR, exist_ok=True)
-db_path = os.path.join(DB_DIR, "ethershare.db")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+db_path = os.path.join(BASE_DIR, "database.db")
 
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{db_path}"
 
