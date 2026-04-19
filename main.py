@@ -142,12 +142,17 @@ def change_password(
 @app.post("/cloud/upload")
 async def upload_cloud_file(file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        # We upload the file directly to Cloudinary
+        name_without_ext = os.path.splitext(file.filename)[0]
+        folder_id = str(uuid.uuid4())[:8]
+
+        # We upload the file directly to Cloudinary securely capturing exact filename
         result = cloudinary.uploader.upload(
             file.file, 
             resource_type="auto",
+            folder=f"ethershare/{folder_id}",
+            public_id=name_without_ext,
             use_filename=True,
-            unique_filename=True,
+            unique_filename=False,
             display_name=file.filename
         )
         file_url = result.get("secure_url")
@@ -197,10 +202,12 @@ async def download_cloud_file(cloud_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="File not found or expired")
     
     url = db_file.file_url
-    # Force the browser to download with the exact original filename
-    import urllib.parse
-    safe_filename = urllib.parse.quote(db_file.filename)
-    if "/upload/" in url:
+
+    # Cloudinary image/video transformations only work on image/video endpoints.
+    # Raw files do not support fl_attachment transformation, so we just redirect.
+    if "/image/upload/" in url or "/video/upload/" in url:
+        import urllib.parse
+        safe_filename = urllib.parse.quote(db_file.filename)
         url = url.replace("/upload/", f"/upload/fl_attachment:{safe_filename}/")
         
     from fastapi.responses import RedirectResponse
