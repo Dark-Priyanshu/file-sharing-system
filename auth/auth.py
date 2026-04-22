@@ -6,7 +6,7 @@ import jwt
 # Configuration
 SECRET_KEY = "ethershare-robust-secure-secret-key-2026-v2" # Increased length for security
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24 hours
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
 def verify_password(plain_password: str, hashed_password: str):
     """

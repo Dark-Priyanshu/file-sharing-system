@@ -809,6 +809,8 @@ async function fetchCloudMetadata(cloud_id) {
         elements.cloudRcvFileInfo.innerText = `Size: ${formatBytes(data.size)} • ${data.mime}`;
         
         elements.cloudDownloadBtn.onclick = () => {
+            // Backend returns a 302 redirect to Cloudinary signed URL
+            // with fl_attachment flag — browser will auto-download the file
             window.location.href = `/cloud/download/${cloud_id}`;
         };
     } catch (err) {
