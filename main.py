@@ -1,29 +1,67 @@
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Request
 from fastapi.encoders import jsonable_encoder
-import json
-import uuid
-import os
-import asyncio
-from datetime import datetime, timezone
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response, JSONResponse
+from fastapi.responses import FileResponse, Response, JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from fastapi import Request
+from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+import json
+import uuid
+import os
+import io
+import asyncio
 import traceback
+import time
+from datetime import datetime, timezone
 import cloudinary
 import cloudinary.uploader
+import cloudinary.utils
+import urllib.parse
+import jwt
+from jwt.exceptions import InvalidTokenError
+
+load_dotenv()
+
+# ── Allowed MIME types for cloud upload (security: block executables etc.) ──
+ALLOWED_MIME_TYPES = {
+    # Images
+    "image/png", "image/jpeg", "image/jpg", "image/gif",
+    "image/webp", "image/svg+xml", "image/bmp", "image/tiff",
+    # Video
+    "video/mp4", "video/webm", "video/ogg", "video/quicktime",
+    "video/x-msvideo", "video/x-matroska",
+    # Audio
+    "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm",
+    "audio/aac", "audio/flac",
+    # Documents
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    # Text / code
+    "text/plain", "text/csv", "text/html", "text/css", "text/javascript",
+    "application/json", "application/xml", "text/xml",
+    # Archives
+    "application/zip", "application/x-zip-compressed",
+    "application/x-rar-compressed", "application/x-7z-compressed",
+    "application/gzip", "application/x-tar",
+    # Fonts
+    "font/ttf", "font/otf", "font/woff", "font/woff2",
+    # Data
+    "application/octet-stream",
+}
+
 
 # Import our new modules
 from db.database import engine, Base, get_db, SessionLocal
 from db.models import User, CloudFile
 from auth.auth import verify_password, get_password_hash, create_access_token, SECRET_KEY, ALGORITHM
-import jwt
-from jwt.exceptions import InvalidTokenError
-from contextlib import asynccontextmanager
-from dotenv import load_dotenv
-load_dotenv()
+
 
 # Cloudinary Setup
 cloudinary.config(
@@ -82,6 +120,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 async def cleanup_expired_files():
+    """Background task: runs every 5 min. Also triggered inline on upload/download."""
     while True:
         db = None
         try:
@@ -103,6 +142,30 @@ async def cleanup_expired_files():
             if db:
                 db.close()
         await asyncio.sleep(60 * 5)
+
+
+def run_inline_cleanup(db: Session):
+    """
+    Inline cleanup helper: called on every upload/download request.
+    Deletes expired files from Cloudinary + DB without waiting for the
+    background task — improves reliability on free-tier hosting (Render)
+    where background tasks may be paused during idle periods.
+    """
+    try:
+        now = datetime.now(timezone.utc)
+        expired_files = db.query(CloudFile).filter(CloudFile.expires_at < now).all()
+        for ef in expired_files:
+            if ef.public_id:
+                try:
+                    cloudinary.uploader.destroy(ef.public_id, resource_type=ef.resource_type or "raw")
+                except Exception as e:
+                    print("[Inline Cleanup] Cloudinary destroy failed:", e)
+            db.delete(ef)
+        if expired_files:
+            db.commit()
+            print(f"[Inline Cleanup] Removed {len(expired_files)} expired file(s).")
+    except Exception as e:
+        print("[Inline Cleanup] Error:", e)
 
 @app.post("/auth/register")
 def register(email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
@@ -141,30 +204,53 @@ def change_password(
 
 @app.post("/cloud/upload")
 async def upload_cloud_file(file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # ── Inline cleanup: remove expired files on every upload request ──
+    run_inline_cleanup(db)
+
+    # ── File type validation (security: block executables & unknown types) ──
+    content_type = (file.content_type or "").lower().strip()
+    # Strip charset/params (e.g. "text/plain; charset=utf-8" → "text/plain")
+    base_content_type = content_type.split(";")[0].strip()
+    if base_content_type and base_content_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                f"File type '{base_content_type}' is not permitted. "
+                "Executables (.exe, .bat, .sh, .msi) and scripts are blocked for security. "
+                "Use P2P Live Transfer to send any file type directly between browsers."
+            )
+        )
+
     try:
         folder_id = str(uuid.uuid4())[:8]
 
-        # We upload the file directly to Cloudinary securely capturing exact filename
+        # Read the entire file content into memory first to avoid empty pointer issue
+        file_content = await file.read()
+        if len(file_content) == 0:
+            raise HTTPException(status_code=400, detail="File is empty")
+
         result = cloudinary.uploader.upload(
-            file.file, 
+            io.BytesIO(file_content),
             resource_type="auto",
             folder=f"ethershare/{folder_id}",
-            public_id=file.filename,
             use_filename=True,
             unique_filename=False,
-            display_name=file.filename
         )
         file_url = result.get("secure_url")
         public_id = result.get("public_id")
+        resource_type = result.get("resource_type", "raw")
         file_size = result.get("bytes", 0)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
-        
+
     db_file = CloudFile(
-        id=str(uuid.uuid4()), 
+        id=str(uuid.uuid4()),
         filename=file.filename,
         file_url=file_url,
         public_id=public_id,
+        resource_type=resource_type,
         mime_type=file.content_type,
         size_bytes=file_size,
         uploader_id=current_user.id
@@ -196,21 +282,32 @@ async def delete_my_file(cloud_id: str, current_user: User = Depends(get_current
 
 @app.get("/cloud/download/{cloud_id}")
 async def download_cloud_file(cloud_id: str, db: Session = Depends(get_db)):
+    # ── Inline cleanup: remove expired files on every download request ──
+    run_inline_cleanup(db)
+
     db_file = db.query(CloudFile).filter(CloudFile.id == cloud_id).first()
     if not db_file:
         raise HTTPException(status_code=404, detail="File not found or expired")
-    
-    url = db_file.file_url
 
-    # Cloudinary image/video transformations only work on image/video endpoints.
-    # Raw files do not support fl_attachment transformation, so we just redirect.
-    if "/image/upload/" in url or "/video/upload/" in url:
-        import urllib.parse
-        safe_filename = urllib.parse.quote(db_file.filename)
-        url = url.replace("/upload/", f"/upload/fl_attachment:{safe_filename}/")
-        
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url=url)
+    # Generate a signed download URL using the attachment flag
+    res_type = db_file.resource_type or "auto"
+
+    # We use the attachment flag to force a download with the original filename
+    # This is the most reliable "default" way to handle Cloudinary downloads.
+    # The filename MUST be URL-encoded, otherwise Cloudinary signature will fail for files with spaces/special characters
+    import urllib.parse
+    encoded_filename = urllib.parse.quote(db_file.filename)
+    
+    signed_url, _ = cloudinary.utils.cloudinary_url(
+        db_file.public_id,
+        resource_type=res_type,
+        type="upload",
+        sign_url=True,
+        flags="attachment",
+        expires_at=int(time.time()) + 3600
+    )
+
+    return RedirectResponse(url=signed_url, status_code=302)
 
 @app.get("/cloud/metadata/{cloud_id}")
 async def get_cloud_metadata(cloud_id: str, db: Session = Depends(get_db)):
@@ -288,6 +385,31 @@ async def create_room(advanced: bool = False):
     room_id = str(uuid.uuid4())[:8].upper()
     room_metadata[room_id] = {"advanced": advanced}
     return {"room_id": room_id}
+
+
+@app.post("/admin/cleanup")
+async def manual_cleanup(db: Session = Depends(get_db)):
+    """
+    Manual cleanup endpoint: deletes all expired files from Cloudinary + DB.
+    Useful for triggering cleanup on free-tier hosting where background tasks
+    may not run reliably. Can be called via cron job or manually.
+    Note: In production, secure this endpoint with authentication.
+    """
+    try:
+        now = datetime.now(timezone.utc)
+        expired_files = db.query(CloudFile).filter(CloudFile.expires_at < now).all()
+        deleted_count = len(expired_files)
+        for ef in expired_files:
+            if ef.public_id:
+                try:
+                    cloudinary.uploader.destroy(ef.public_id, resource_type=ef.resource_type or "raw")
+                except Exception as e:
+                    print("[Manual Cleanup] Cloudinary destroy failed:", e)
+            db.delete(ef)
+        db.commit()
+        return {"status": "ok", "deleted": deleted_count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
 
 
 if __name__ == "__main__":

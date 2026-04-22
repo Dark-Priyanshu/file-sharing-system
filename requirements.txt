@@ -6,3 +6,7 @@ python-multipart
 pyjwt
 bcrypt
 python-dotenv
+requests
+pymysql
+cryptography
+httpx

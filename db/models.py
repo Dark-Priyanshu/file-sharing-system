@@ -9,19 +9,20 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True)
-    hashed_password = Column(String)
+    email = Column(String(255), unique=True, index=True)
+    hashed_password = Column(String(255))
 
     files = relationship("CloudFile", back_populates="uploader")
 
 class CloudFile(Base):
     __tablename__ = "cloud_files"
 
-    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    filename = Column(String)
-    file_url = Column(String)
-    public_id = Column(String)
-    mime_type = Column(String)
+    id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    filename = Column(String(255))
+    file_url = Column(String(1000))
+    public_id = Column(String(255))
+    resource_type = Column(String(20), default="raw")  # image, video, raw
+    mime_type = Column(String(100))
     size_bytes = Column(Float)
     
     # 24 hours expiry
