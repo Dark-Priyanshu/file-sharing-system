@@ -316,11 +316,11 @@ async def download_cloud_file(cloud_id: str, db: Session = Depends(get_db)):
         resource_type=res_type,
         type="upload",
         sign_url=True,
-        flags="attachment",
+        flags=f"attachment:{encoded_filename}",
         expires_at=int(time.time()) + 3600
     )
 
-    return RedirectResponse(url=signed_url, status_code=302)
+    return JSONResponse({"url": signed_url, "filename": db_file.filename})
 
 @app.get("/cloud/metadata/{cloud_id}")
 async def get_cloud_metadata(cloud_id: str, db: Session = Depends(get_db)):
