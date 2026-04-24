@@ -837,26 +837,16 @@ async function fetchCloudMetadata(cloud_id) {
         elements.cloudRcvFileName.innerText = data.filename;
         elements.cloudRcvFileInfo.innerText = `Size: ${formatBytes(data.size)} • ${data.mime}`;
         
-        elements.cloudDownloadBtn.onclick = async () => {
-            elements.cloudDownloadBtn.disabled = true;
-            elements.cloudDownloadBtn.innerText = 'Preparing...';
-            try {
-                const dlRes = await fetch(`/cloud/download/${cloud_id}`);
-                if (!dlRes.ok) throw new Error('Download link failed');
-                const dlData = await dlRes.json();
-                const a = document.createElement('a');
-                a.href = dlData.url;
-                a.download = dlData.filename || data.filename;
-                a.target = '_blank';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-            } catch (err) {
-                alert('Download failed. The file may have expired.');
-            } finally {
-                elements.cloudDownloadBtn.disabled = false;
-                elements.cloudDownloadBtn.innerText = 'Direct Download';
-            }
+        elements.cloudDownloadBtn.onclick = () => {
+            // Backend now proxies the file stream directly from Cloudinary.
+            // It's a same-origin request, so the browser will download it
+            // correctly with the filename set by Content-Disposition.
+            const a = document.createElement('a');
+            a.href = `/cloud/download/${cloud_id}`;
+            a.download = data.filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
         };
     } catch (err) {
         elements.cloudRcvFileName.innerText = "Link Expired";
