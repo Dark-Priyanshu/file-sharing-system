@@ -837,10 +837,26 @@ async function fetchCloudMetadata(cloud_id) {
         elements.cloudRcvFileName.innerText = data.filename;
         elements.cloudRcvFileInfo.innerText = `Size: ${formatBytes(data.size)} • ${data.mime}`;
         
-        elements.cloudDownloadBtn.onclick = () => {
-            // Backend returns a 302 redirect to Cloudinary signed URL
-            // with fl_attachment flag — browser will auto-download the file
-            window.location.href = `/cloud/download/${cloud_id}`;
+        elements.cloudDownloadBtn.onclick = async () => {
+            elements.cloudDownloadBtn.disabled = true;
+            elements.cloudDownloadBtn.innerText = 'Preparing...';
+            try {
+                const dlRes = await fetch(`/cloud/download/${cloud_id}`);
+                if (!dlRes.ok) throw new Error('Download link failed');
+                const dlData = await dlRes.json();
+                const a = document.createElement('a');
+                a.href = dlData.url;
+                a.download = dlData.filename || data.filename;
+                a.target = '_blank';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            } catch (err) {
+                alert('Download failed. The file may have expired.');
+            } finally {
+                elements.cloudDownloadBtn.disabled = false;
+                elements.cloudDownloadBtn.innerText = 'Direct Download';
+            }
         };
     } catch (err) {
         elements.cloudRcvFileName.innerText = "Link Expired";
