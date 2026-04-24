@@ -12,11 +12,21 @@ db_path = os.path.join(BASE_DIR, "database.db")
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{db_path}")
 
 connect_args = {}
+pool_kwargs = {}
+
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
     connect_args["check_same_thread"] = False
+else:
+    # MySQL Connection Pooling Best Practices
+    pool_kwargs = {
+        "pool_size": 10,
+        "max_overflow": 20,
+        "pool_recycle": 3600, # Recycle connections after 1 hour
+        "pool_pre_ping": True, # Verify connection is alive before using
+    }
 
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args=connect_args
+    SQLALCHEMY_DATABASE_URL, connect_args=connect_args, **pool_kwargs
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

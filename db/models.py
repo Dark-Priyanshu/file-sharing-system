@@ -30,3 +30,12 @@ class CloudFile(Base):
     
     uploader_id = Column(Integer, ForeignKey("users.id"))
     uploader = relationship("User", back_populates="files")
+
+class P2PRoom(Base):
+    __tablename__ = "p2p_rooms"
+
+    id = Column(String(36), primary_key=True, index=True)
+    advanced_mode = Column(Integer, default=0) # 0 for False, 1 for True (Integer used for better cross-db support)
+    metadata_json = Column(String(2000), nullable=True) # stores filename, size
+    status = Column(String(20), default="active") # active, completed
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
