@@ -36,7 +36,7 @@ ALLOWED_MIME_TYPES = {
     "video/x-msvideo", "video/x-matroska",
     # Audio
     "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm",
-    "audio/aac", "audio/flac",
+    "audio/aac", "audio/flac", "audio/x-m4a", "audio/mp4",
     # Documents
     "application/pdf",
     "application/msword",
