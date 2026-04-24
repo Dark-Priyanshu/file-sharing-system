@@ -3,8 +3,8 @@
 // Advanced Mode: 256KB chunks, 3 parallel data channels, ACK-based resume
 // =====================================================
 
-const CHUNK_SIZE_STD = 64 * 1024;      // 64KB standard
-const CHUNK_SIZE_ADV = 256 * 1024;     // 256KB advanced
+const CHUNK_SIZE_STD = 16 * 1024;      // 16KB standard (safe for all browsers)
+const CHUNK_SIZE_ADV = 64 * 1024;      // 64KB advanced (safe within 256KB limit)
 const PARALLEL_CHANNELS = 3;           // Number of parallel streams in advanced mode
 const BACKPRESSURE_THRESHOLD = 8 * 1024 * 1024; // 8MB
 
@@ -290,17 +290,23 @@ class P2PTransfer {
                 new DataView(buffer.buffer).setUint32(0, chunkIndex);
                 buffer.set(new Uint8Array(data), 4);
                 
-                try {
-                    this.dataChannel.send(buffer);
-                    offset += data.byteLength;
-                    chunkIndex++;
-                    this.onProgress(Math.round((offset / this.file.size) * 100));
-                    
-                    const delay = this.dataChannel.bufferedAmount > BACKPRESSURE_THRESHOLD ? 50 : 0;
-                    setTimeout(sendNext, delay);
-                } catch (err) {
-                    console.error('[Standard] Send error:', err);
-                }
+                const waitAndSend = () => {
+                    if (this.dataChannel.bufferedAmount > BACKPRESSURE_THRESHOLD) {
+                        setTimeout(waitAndSend, 30);
+                    } else {
+                        try {
+                            this.dataChannel.send(buffer);
+                            offset += data.byteLength;
+                            chunkIndex++;
+                            this.onProgress(Math.round((offset / this.file.size) * 100));
+                            
+                            sendNext();
+                        } catch (err) {
+                            console.error('[Standard] Send error:', err);
+                        }
+                    }
+                };
+                waitAndSend();
             };
             reader.readAsArrayBuffer(slice);
         };

@@ -21,6 +21,8 @@ import cloudinary.utils
 import urllib.parse
 import jwt
 from jwt.exceptions import InvalidTokenError
+from datetime import timedelta
+import socketio
 
 load_dotenv()
 
@@ -59,7 +61,7 @@ ALLOWED_MIME_TYPES = {
 
 # Import our new modules
 from db.database import engine, Base, get_db, SessionLocal
-from db.models import User, CloudFile
+from db.models import User, CloudFile, P2PRoom
 from auth.auth import verify_password, get_password_hash, create_access_token, SECRET_KEY, ALGORITHM
 
 
@@ -79,6 +81,8 @@ async def lifespan(app: FastAPI):
     task.cancel()
 
 app = FastAPI(lifespan=lifespan)
+sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
+socketio_app = socketio.ASGIApp(sio, app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -127,6 +131,8 @@ async def cleanup_expired_files():
             from db.database import SessionLocal
             db = SessionLocal()
             now = datetime.now(timezone.utc)
+            
+            # Cleanup expired cloud files
             expired_files = db.query(CloudFile).filter(CloudFile.expires_at < now).all()
             for ef in expired_files:
                 if ef.public_id:
@@ -135,6 +141,13 @@ async def cleanup_expired_files():
                     except Exception as e:
                         print("Failed to delete from Cloudinary:", e)
                 db.delete(ef)
+                
+            # Cleanup expired P2P rooms (older than 1 hour)
+            one_hour_ago = now - timedelta(hours=1)
+            expired_rooms = db.query(P2PRoom).filter(P2PRoom.created_at < one_hour_ago).all()
+            for room in expired_rooms:
+                db.delete(room)
+                
             db.commit()
         except Exception as e:
             print("Cleanup error:", e)
@@ -332,60 +345,96 @@ async def get_download_page(cloud_id: str):
 async def favicon():
     return Response(content=b"", media_type="image/x-icon")
 
-# In-memory storage for HTTP polling signaling
-rooms_messages: dict[str, list[dict]] = {}
-room_clients: dict[str, set] = {}
-room_metadata: dict[str, dict] = {} # New: Store room settings like advanced_mode
+@app.get("/config/ice_servers.json")
+async def get_ice_servers():
+    file_path = os.path.join(BASE_DIR, "config", "stun_servers.json")
+    if os.path.exists(file_path):
+        with open(file_path, 'r') as f:
+            return json.load(f)
+    return []
 
-@app.post("/signal/{room_id}/join")
-async def join_room(room_id: str, payload: dict):
-    client_id = payload.get("client_id")
-    if not client_id:
-        raise HTTPException(status_code=400, detail="Missing client_id")
+# Socket.io Signaling
+room_clients_sio = {} # room_id -> set of sid
 
-    if room_id not in rooms_messages:
-        rooms_messages[room_id] = []
-        room_clients[room_id] = set()
+@sio.event
+async def join_room(sid, data):
+    room_id = data.get("room_id")
+    client_id = data.get("client_id")
+    if not room_id or not client_id:
+        return
+        
+    await sio.enter_room(sid, room_id)
     
-    room_clients[room_id].add(client_id)
-    print(f"Client {client_id} joined room: {room_id}. Total users: {len(room_clients[room_id])}")
+    if room_id not in room_clients_sio:
+        room_clients_sio[room_id] = set()
+    room_clients_sio[room_id].add(sid)
     
-    if len(room_clients[room_id]) == 2:
-        metadata = room_metadata.get(room_id, {"advanced": False})
-        ready_msg = {
-            "type": "ready", 
-            "room_id": room_id,
-            "advanced": metadata.get("advanced", False),
-            "sender_id": "server"
-        }
-        if not any(msg.get("type") == "ready" for msg in rooms_messages[room_id]):
-            rooms_messages[room_id].append(ready_msg)
-
-    return {"status": "joined", "client_count": len(room_clients[room_id])}
-
-@app.post("/signal/{room_id}/send")
-async def send_signal(room_id: str, message: dict):
-    if room_id not in rooms_messages:
-        rooms_messages[room_id] = []
-        room_clients[room_id] = set()
+    print(f"Client {sid} ({client_id}) joined room {room_id}. Total: {len(room_clients_sio[room_id])}")
     
-    rooms_messages[room_id].append(message)
-    return {"status": "sent"}
+    # Store sid -> room_id for disconnect handling
+    async with sio.session(sid) as session:
+        session['room_id'] = room_id
+        session['client_id'] = client_id
+        
+    if len(room_clients_sio[room_id]) == 2:
+        # Fetch metadata from DB to send to receiver
+        db = SessionLocal()
+        try:
+            room_record = db.query(P2PRoom).filter(P2PRoom.id == room_id).first()
+            advanced_mode = room_record.advanced_mode == 1 if room_record else False
+            metadata = json.loads(room_record.metadata_json) if room_record and room_record.metadata_json else {}
+            
+            ready_msg = {
+                "type": "ready",
+                "room_id": room_id,
+                "advanced": advanced_mode,
+                "metadata": metadata,
+                "sender_id": "server"
+            }
+            await sio.emit('signal', ready_msg, room=room_id)
+        finally:
+            db.close()
 
-@app.get("/signal/{room_id}/poll")
-async def poll_signal(room_id: str, last_index: int = 0):
-    if room_id not in rooms_messages:
-        return {"messages": [], "last_index": 0}
+@sio.event
+async def signal(sid, data):
+    room_id = data.get("room_id")
+    if room_id:
+        # Broadcast to everyone in the room except the sender
+        await sio.emit('signal', data, room=room_id, skip_sid=sid)
+
+@sio.event
+async def disconnect(sid):
+    try:
+        async with sio.session(sid) as session:
+            room_id = session.get('room_id')
+            if room_id and room_id in room_clients_sio:
+                if sid in room_clients_sio[room_id]:
+                    room_clients_sio[room_id].remove(sid)
+                
+                # Notify the other peer
+                await sio.emit('peer_disconnected', {"sid": sid}, room=room_id)
+                
+                if len(room_clients_sio[room_id]) == 0:
+                    del room_clients_sio[room_id]
+    except Exception as e:
+        print(f"Disconnect handling error: {e}")
+
+@app.post("/create_room")
+async def create_room(payload: dict, db: Session = Depends(get_db)):
+    advanced = payload.get("advanced", False)
+    metadata = payload.get("metadata", {})
     
-    messages = rooms_messages[room_id][last_index:]
-    return {"messages": messages, "last_index": len(rooms_messages[room_id])}
-
-@app.get("/create_room")
-async def create_room(advanced: bool = False):
     room_id = str(uuid.uuid4())[:8].upper()
-    room_metadata[room_id] = {"advanced": advanced}
+    
+    new_room = P2PRoom(
+        id=room_id,
+        advanced_mode=1 if advanced else 0,
+        metadata_json=json.dumps(metadata)
+    )
+    db.add(new_room)
+    db.commit()
+    
     return {"room_id": room_id}
-
 
 @app.post("/admin/cleanup")
 async def manual_cleanup(db: Session = Depends(get_db)):
@@ -406,12 +455,19 @@ async def manual_cleanup(db: Session = Depends(get_db)):
                 except Exception as e:
                     print("[Manual Cleanup] Cloudinary destroy failed:", e)
             db.delete(ef)
+            
+        one_hour_ago = now - timedelta(hours=1)
+        expired_rooms = db.query(P2PRoom).filter(P2PRoom.created_at < one_hour_ago).all()
+        for room in expired_rooms:
+            db.delete(room)
+            
         db.commit()
-        return {"status": "ok", "deleted": deleted_count}
+        return {"status": "ok", "deleted_files": deleted_count, "deleted_rooms": len(expired_rooms)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
 
-
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=10000)
+    # Make sure to run the socketio_app
+    uvicorn.run(socketio_app, host="0.0.0.0", port=10000)
+

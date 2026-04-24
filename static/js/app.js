@@ -4,12 +4,12 @@ let room_id = null;
 let cloud_id = null;
 let role = 'sender'; 
 let clientId = Math.random().toString(36).substring(2, 10);
-let pollingTimer = null;
-let lastPollIndex = 0;
+let socket = null;
 let p2p = null;
 let currentFile = null;
 let startTime = 0;
 let handshakePromise = null;
+let cachedIceServers = null;
 
 let token = localStorage.getItem('ethershare_token');
 let userEmail = localStorage.getItem('ethershare_email');
@@ -461,24 +461,34 @@ window.copyCloudLink = (url, btn) => {
 // ------ SHARING METHOD LOGIC ------
 elements.methodP2p?.addEventListener('click', async () => {
     try {
-        // Include current advanced_transfer setting in room creation
-        const urlParams = new URLSearchParams();
-        urlParams.append('advanced', advancedTransferMode);
-        
-        const res = await fetch(`/create_room?${urlParams.toString()}`);
+        const metadata = {
+            name: currentFile.name,
+            size: currentFile.size,
+            mime: currentFile.type || 'application/octet-stream'
+        };
+
+        const res = await fetch('/create_room', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ advanced: advancedTransferMode, metadata })
+        });
         const data = await res.json();
+        
+        if (!res.ok) throw new Error(data.detail || "Failed to create room");
+        
         room_id = data.room_id;
         
         elements.fileNameLabel.innerText = currentFile.name;
         elements.fileInfoLabel.innerText = `${formatBytes(currentFile.size)} • ${currentFile.type || 'Unknown Type'}`;
         
-        setupSignaling(room_id);
+        await setupSignaling(room_id);
         
         const url = `${window.location.origin}/live/${room_id}`;
         elements.shareUrl.innerText = url;
         generateQRCode(url);
         switchView('share');
     } catch (err) {
+        console.error("P2P creation failed:", err);
         elements.methodFileName.innerText = "Connection failed";
         elements.methodFileName.style.color = "red";
     }
@@ -544,50 +554,45 @@ elements.methodCloud?.addEventListener('click', async () => {
 // ----------------------------------
 
 async function setupSignaling(id) {
-    console.log('Signaling: HTTP Polling started');
+    console.log('Signaling: Socket.io started');
     
-    try {
-        await fetch(`/signal/${id}/join`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ client_id: clientId })
+    if (!socket) {
+        socket = io({ reconnectionAttempts: 3, timeout: 10000 });
+        
+        socket.on('connect', () => {
+            console.log("Socket connected");
+            if (elements.statusText) elements.statusText.innerText = "Waiting for peer...";
+            socket.emit('join_room', { room_id: id, client_id: clientId });
         });
-    } catch (err) {
-        console.error('Failed to join room', err);
-    }
 
-    if (pollingTimer) clearTimeout(pollingTimer);
-    
-    const poll = async () => {
-        try {
-            const res = await fetch(`/signal/${id}/poll?last_index=${lastPollIndex}`);
-            if (res.ok) {
-                const data = await res.json();
-                lastPollIndex = data.last_index;
-                for (const msg of data.messages) {
-                    if (msg.sender_id === clientId && msg.type !== 'ready') continue;
-                    await handleSignalMessage(msg);
-                }
+        socket.on('disconnect', () => {
+            console.log("Socket disconnected");
+            if (elements.statusText) elements.statusText.innerText = "Reconnecting...";
+            if (role === 'receiver' && elements.rcvFileInfo) {
+                elements.rcvFileInfo.innerText = "Disconnected from server. Reconnecting...";
             }
-        } catch (err) {
-            console.error('Poll error', err);
-        }
-        pollingTimer = setTimeout(poll, 300); // 300ms for fast ICE exchange
-    };
-    poll();
+        });
+        
+        socket.on('peer_disconnected', () => {
+            console.log("Peer disconnected");
+            if (elements.statusText) elements.statusText.innerText = "Sender disconnected. Waiting...";
+            if (role === 'receiver' && elements.rcvFileInfo) {
+                elements.rcvFileInfo.innerText = "Sender disconnected.";
+            }
+        });
+
+        socket.on('signal', async (msg) => {
+            if (msg.sender_id === clientId && msg.type !== 'ready') return;
+            await handleSignalMessage(msg);
+        });
+    } else {
+        socket.emit('join_room', { room_id: id, client_id: clientId });
+    }
 }
 
 async function sendSignalMsg(msg) {
-    if (!room_id) return;
-    try {
-        await fetch(`/signal/${room_id}/send`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({...msg, sender_id: clientId})
-        });
-    } catch(err) {
-        console.error('Signal sending failed:', err);
-    }
+    if (!room_id || !socket || !socket.connected) return;
+    socket.emit('signal', {...msg, sender_id: clientId, room_id: room_id});
 }
 
 async function handleSignalMessage(data) {
@@ -595,6 +600,9 @@ async function handleSignalMessage(data) {
         case 'ready':
             if (data.advanced !== undefined) {
                 advancedTransferMode = data.advanced;
+            }
+            if (role === 'receiver' && data.metadata) {
+                onMetadataReceived(data.metadata);
             }
             await startHandshake();
             if (role === 'sender') {
@@ -658,9 +666,15 @@ async function startHandshake() {
             sendSignalMsg(msg);
         };
 
-        const configRes = await fetch('/config/stun_servers.json');
-        const iceServers = await configRes.json();
-        await p2p.init(iceServers);
+        if (!cachedIceServers) {
+            try {
+                const configRes = await fetch('/config/ice_servers.json');
+                cachedIceServers = await configRes.json();
+            } catch(e) {
+                cachedIceServers = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+            }
+        }
+        await p2p.init(cachedIceServers);
     })();
     return handshakePromise;
 }
@@ -707,22 +721,36 @@ let reconnectLock = false;
 async function autoReconnectWebRTC() {
     if (reconnectLock) return;
     reconnectLock = true;
-    if (elements.statusText) elements.statusText.innerText = "Connection lost. Attempting to resume...";
+    if (elements.statusText) elements.statusText.innerText = "Connection lost. Resuming...";
+    
+    // Check if socket is disconnected, try to reconnect it
+    if (socket && !socket.connected) {
+        socket.connect();
+    }
+    
     handshakePromise = null; // Allow fresh handshake
     try {
-        const configRes = await fetch('/config/stun_servers.json');
-        const iceServers = await configRes.json();
+        if (!cachedIceServers) {
+            const configRes = await fetch('/config/ice_servers.json');
+            cachedIceServers = await configRes.json();
+        }
         if (p2p) {
-            await p2p.resetConnection(iceServers);
+            await p2p.resetConnection(cachedIceServers);
             p2p.onSignal = (msg) => { sendSignalMsg(msg); };
         }
         if (role === 'sender' && currentFile) {
             p2p.startTransfer(currentFile);
             const offer = await p2p.createOffer();
             sendSignalMsg({ type: 'offer', offer });
+        } else if (role === 'receiver') {
+             // Let sender know we are ready to resume
+             if (p2p && p2p.receivedSize > 0) {
+                 sendSignalMsg({ type: 'resume', offset: p2p.receivedSize });
+             }
         }
     } catch (err) {
         console.error("Resume failed:", err);
+        if (elements.statusText) elements.statusText.innerText = "Failed to resume transfer.";
     } finally {
         setTimeout(() => { reconnectLock = false; }, 5000); // Allow retry after 5s
     }
@@ -730,6 +758,7 @@ async function autoReconnectWebRTC() {
 
 function onTransferError(err) {
     console.error('P2P Error:', err);
+    if (elements.statusText) elements.statusText.innerText = "Transfer failed, retrying...";
     autoReconnectWebRTC();
 }
 
