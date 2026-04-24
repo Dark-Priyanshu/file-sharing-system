@@ -13,6 +13,7 @@ import os
 import io
 import asyncio
 import traceback
+import httpx
 import time
 from datetime import datetime, timezone
 import cloudinary
@@ -302,25 +303,36 @@ async def download_cloud_file(cloud_id: str, db: Session = Depends(get_db)):
     if not db_file:
         raise HTTPException(status_code=404, detail="File not found or expired")
 
-    # Generate a signed download URL using the attachment flag
-    res_type = db_file.resource_type or "auto"
+    res_type = db_file.resource_type or "raw"
 
-    # We use the attachment flag to force a download with the original filename
-    # This is the most reliable "default" way to handle Cloudinary downloads.
-    # The filename MUST be URL-encoded, otherwise Cloudinary signature will fail for files with spaces/special characters
-    import urllib.parse
-    encoded_filename = urllib.parse.quote(db_file.filename)
-    
-    signed_url, _ = cloudinary.utils.cloudinary_url(
+    # Build a plain (unsigned) Cloudinary URL — no CORS issues when proxied server-side
+    plain_url, _ = cloudinary.utils.cloudinary_url(
         db_file.public_id,
         resource_type=res_type,
         type="upload",
-        sign_url=True,
-        flags=f"attachment:{encoded_filename}",
-        expires_at=int(time.time()) + 3600
+        sign_url=False,
     )
 
-    return JSONResponse({"url": signed_url, "filename": db_file.filename})
+    # Proxy the file through our server so the browser never makes a
+    # cross-origin request (which would fail due to CORS on Cloudinary).
+    # We stream it back with the correct Content-Disposition so the browser
+    # saves the file with its original name.
+    encoded_filename = urllib.parse.quote(db_file.filename)
+    content_disposition = f'attachment; filename="{db_file.filename}"; filename*=UTF-8\'\'{encoded_filename}'
+    mime = db_file.mime_type or "application/octet-stream"
+
+    async def stream_cloudinary():
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+            async with client.stream("GET", plain_url) as r:
+                async for chunk in r.aiter_bytes(65536):  # 64 KB chunks
+                    yield chunk
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        stream_cloudinary(),
+        media_type=mime,
+        headers={"Content-Disposition": content_disposition}
+    )
 
 @app.get("/cloud/metadata/{cloud_id}")
 async def get_cloud_metadata(cloud_id: str, db: Session = Depends(get_db)):

@@ -837,40 +837,16 @@ async function fetchCloudMetadata(cloud_id) {
         elements.cloudRcvFileName.innerText = data.filename;
         elements.cloudRcvFileInfo.innerText = `Size: ${formatBytes(data.size)} • ${data.mime}`;
         
-        elements.cloudDownloadBtn.onclick = async () => {
-            elements.cloudDownloadBtn.disabled = true;
-            elements.cloudDownloadBtn.innerText = 'Preparing...';
-            try {
-                // Step 1: Get the signed Cloudinary URL from our backend
-                const dlRes = await fetch(`/cloud/download/${cloud_id}`);
-                if (!dlRes.ok) throw new Error('Download link failed');
-                const dlData = await dlRes.json();
-
-                // Step 2: Fetch the actual file from Cloudinary as a blob.
-                // This is required because browsers IGNORE the `download` attribute
-                // on cross-origin URLs — without this, the file opens in a new tab
-                // instead of being downloaded.
-                elements.cloudDownloadBtn.innerText = 'Downloading...';
-                const fileRes = await fetch(dlData.url);
-                if (!fileRes.ok) throw new Error('Failed to fetch file from cloud');
-                const blob = await fileRes.blob();
-
-                // Step 3: Create a local blob URL and trigger a real download
-                const blobUrl = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = blobUrl;
-                a.download = dlData.filename || data.filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                // Free memory after a short delay
-                setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
-            } catch (err) {
-                alert('Download failed. The file may have expired.');
-            } finally {
-                elements.cloudDownloadBtn.disabled = false;
-                elements.cloudDownloadBtn.innerText = 'Direct Download';
-            }
+        elements.cloudDownloadBtn.onclick = () => {
+            // Backend now proxies the file stream directly from Cloudinary.
+            // It's a same-origin request, so the browser will download it
+            // correctly with the filename set by Content-Disposition.
+            const a = document.createElement('a');
+            a.href = `/cloud/download/${cloud_id}`;
+            a.download = data.filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
         };
     } catch (err) {
         elements.cloudRcvFileName.innerText = "Link Expired";
